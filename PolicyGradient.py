@@ -27,21 +27,21 @@ for episode in range(500): #episode一局
     log_prob = [] #logΠ(a|s)
     rewards = []
 
-    done = False
     while True:
         #算法
         state_tensor = torch.tensor(state, dtype=torch.float) #转化为张量，PyTorch定义的神经网络只接收张量输入
-        action_prob = policy.forward(state_tensor) #映射得概率
+        action_prob = policy.forward(state_tensor) #映射得概率，离散
 
-        
+        sampled_action = torch.multinomial(action_prob,1) #采样，返回索引
+        log_prob.append(action_prob[sampled_action]) #（取出概率值）->放到log_prob列表最后(.append)
+
+        action = sampled_action.item() #索引转化成整数
+        state, reward, terminated, truncated, info = env.step(action) #环境执行，动作索引->新状态，及时奖励，自然终止，截断，额外info
+        done = terminated or truncated #两个终止标志合并
+
+        rewards.append(reward) #更新
+        if done: break
         ####
-        next_observation, reward, terminated, truncated, info = env.step(action) #执行动作，映射环境定义
-        done = terminated or truncated
-        if done:
-            break
-
-        update(observation, action, reward, terminated) #算法更新模型参数
-        observation = next_observation #更新观测空间
 
 env.close()
 
