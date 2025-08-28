@@ -1,5 +1,3 @@
-from os import truncate
-
 import gymnasium
 from pygame.display import update
 
