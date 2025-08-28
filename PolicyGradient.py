@@ -4,8 +4,7 @@ import torch
 import torch.nn as nn
 #神经网络函数接口
 import torch.nn.functional as F
-from fontTools.misc.cython import returns
-
+import matplotlib.pyplot as plt
 
 #状态->动作概率
 class Policy(nn.Module):
@@ -19,11 +18,13 @@ class Policy(nn.Module):
         output = F.softmax(self.fc2(x), dim=-1) #dim=-1直接选中特征数，无需记忆索引
         return output #动作概率分布
 
-env = gymnasium.make("CartPole-v1") #预设环境
+env = gymnasium.make("CartPole-v1")
+#env = gymnasium.make("CartPole-v1", render_mode="human") #预设环境
 policy = Policy()
-optimizer = torch.optim.Adam(policy.parameters(), lr=1e-3)
+optimizer = torch.optim.Adam(policy.parameters(), lr=0.003)
 
 gamma = 0.99 #折扣因子γ
+all_rewards = []
 for episode in range(500): #episode一局
     state, info = env.reset() #初始化环境[位置，速度，角度，角速度]
     log_prob = [] #logΠ(a|s)
@@ -62,6 +63,8 @@ for episode in range(500): #episode一局
     optimizer.step() #更新模型参数
     ####
     total_reward = sum(rewards)
+    all_rewards.append(total_reward)
     print(f"Episode {episode}, total reward: {total_reward}")
 
-
+plt.plot(all_rewards)
+plt.show()
