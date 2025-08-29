@@ -5,8 +5,6 @@ import torch.nn as nn
 #神经网络函数接口
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
-from sympy.physics.quantum.identitysearch import lr_op
-
 
 #状态->动作概率
 class Policy(nn.Module):
@@ -65,6 +63,7 @@ for episode in range(500): #episode一局
     returns = (returns - returns.mean()) / (returns.std() + 1e-5)  #去基线b/奖励标准差
     for log_p, G in zip(log_prob, returns): #取变量赋值
         loss = loss - G * log_p
+    loss = torch.mean(loss) #要算损失的均值，否则受episode数值影响
 
     optimizer.zero_grad() #梯度清零
     loss.backward() #反向传播，自动计算loss对模型所有可训练参数的梯度
