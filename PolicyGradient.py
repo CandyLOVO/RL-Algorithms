@@ -5,6 +5,8 @@ import torch.nn as nn
 #神经网络函数接口
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
+from sympy.physics.quantum.identitysearch import lr_op
+
 
 #状态->动作概率
 class Policy(nn.Module):
@@ -14,6 +16,7 @@ class Policy(nn.Module):
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
         self.fc3 = nn.Linear(hidden_dim, action_dim)
 
+    #在下方训练中传入当前环境参数
     def forward(self, x): #x必须是张量
         x = F.relu(self.fc1(x)) #输入映射ReUL
         x = F.relu(self.fc2(x))
@@ -23,22 +26,24 @@ class Policy(nn.Module):
 env = gymnasium.make("CartPole-v1")
 # env = gymnasium.make("CartPole-v1", render_mode="human") #预设环境
 policy = Policy()
-optimizer = torch.optim.Adam(policy.parameters(), lr=0.001)
+lr_optim = 0.0001
+optimizer = torch.optim.Adam(policy.parameters(), lr=lr_optim)
 
 gamma = 0.8 #折扣因子γ
 all_rewards = []
-for episode in range(500): #episode一局
+for episode in range(1000): #episode一局
     state, info = env.reset() #初始化环境[位置，速度，角度，角速度]
     log_prob = [] #logΠ(a|s)
     rewards = []
+    sampled_action = []
 
     while True:
     #算法
         state_tensor = torch.tensor(state, dtype=torch.float) #转化为张量，PyTorch定义的神经网络只接收张量输入
-        action_prob = policy.forward(state_tensor) #映射得概率，离散
+        action_prob = policy.forward(state_tensor) #当前环境参数映射得概率，离散
 
         sampled_action = torch.multinomial(action_prob,1) #采样，返回索引
-        log_prob.append(action_prob[sampled_action]) #（取出概率值）->放到log_prob列表最后(.append)
+        log_prob.append(torch.log(action_prob[sampled_action])) #（取出概率值）取对数！！！！->放到log_prob列表最后(.append)
 
         action = sampled_action.item() #索引转化成整数
         state, reward, terminated, truncated, info = env.step(action) #环境执行，动作索引->新状态，及时奖励，自然终止，截断，额外info
@@ -47,26 +52,31 @@ for episode in range(500): #episode一局
         done = terminated or truncated #两个终止标志合并
         if done: break
 
-    #策略梯度算法
+    #回合结束，策略梯度算法更新θ
     returns = []
     G_t = 0
+    loss = 0
     for r in rewards[::-1]: #反向遍历
         G_t = r + gamma * G_t
         returns.insert(0, G_t) #恢复原顺序
     returns = torch.tensor(returns) #转化为张量（同上）
     returns = (returns - returns.mean()) / (returns.std() + 1e-5)  #去基线b/奖励标准差
-
-    loss = 0
     for log_p, G in zip(log_prob, returns): #取变量赋值
         loss = loss - G * log_p
 
     optimizer.zero_grad() #梯度清零
     loss.backward() #反向传播，自动计算loss对模型所有可训练参数的梯度
-    optimizer.step() #更新模型参数
+    optimizer.step() #更新θ
     ####
+
     total_reward = sum(rewards)
     all_rewards.append(total_reward)
-    print(f"Episode {episode}, total reward: {total_reward}")
+    if episode % 50 == 0:
+        print(f"Episode {episode}, total reward: {total_reward}")
 
 plt.plot(all_rewards)
+plt.xlabel("Episode")
+plt.ylabel("Total reward")
+text = f"lr: {lr_optim} \n gamma: {gamma}"
+plt.text(x=200, y=90, s=text)
 plt.show()
