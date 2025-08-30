@@ -5,8 +5,8 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="3e292da8-99f8-4881-bb66-ef0d59932887" name="更改" comment="">
+      <change afterPath="$PROJECT_DIR$/PPO.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/PolicyGradient.py" beforeDir="false" afterPath="$PROJECT_DIR$/PolicyGradient.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -68,7 +68,7 @@
       <workItem from="1756437386518" duration="12586000" />
       <workItem from="1756450824896" duration="520000" />
       <workItem from="1756473096874" duration="3075000" />
-      <workItem from="1756543230168" duration="1937000" />
+      <workItem from="1756543230168" duration="4288000" />
     </task>
     <servers />
   </component>
@@ -76,6 +76,6 @@
     <option name="version" value="3" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
-    <SUITE FILE_PATH="coverage/ReinforcementLearning$PolicyGradient.coverage" NAME="PolicyGradient 覆盖结果" MODIFIED="1756549220306" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/ReinforcementLearning$PolicyGradient.coverage" NAME="PolicyGradient 覆盖结果" MODIFIED="1756549321101" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
   </component>
 </project>
