@@ -24,3 +24,8 @@ class PolicyValue(nn.Module):
         x = torch.tanh(self.fc1(x)) #输出范围[-1,1]
         x = torch.tanh(self.fc2(x))
         return x
+
+    def get_action(self, state):
+        fratures = self.forward(state)
+        
+

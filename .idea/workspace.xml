@@ -7,7 +7,6 @@
     <list default="true" id="3e292da8-99f8-4881-bb66-ef0d59932887" name="更改" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/PPO.py" beforeDir="false" afterPath="$PROJECT_DIR$/PPO.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/PolicyGradient.py" beforeDir="false" afterPath="$PROJECT_DIR$/PolicyGradient.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -72,7 +71,7 @@
       <workItem from="1756473096874" duration="3075000" />
       <workItem from="1756543230168" duration="4288000" />
       <workItem from="1756700535357" duration="791000" />
-      <workItem from="1756788524610" duration="9110000" />
+      <workItem from="1756788524610" duration="9686000" />
     </task>
     <servers />
   </component>
