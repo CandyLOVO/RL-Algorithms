@@ -20,7 +20,7 @@ class Policy(nn.Module):
         x = F.relu(self.fc1(x)) #输入映射ReUL
         # x = F.relu(self.fc2(x))
         # output = F.softmax(self.fc3(x), dim=-1) #dim=-1直接选中特征数，无需记忆索引
-        output = F.softmax(self.fc2(x), dim=-1)
+        output = F.softmax(self.fc2(x), dim=-1) #逻辑回归 nn.Linear输出logits（分类分布参数）
         return output #动作概率分布
 
 env = gymnasium.make("CartPole-v1")
