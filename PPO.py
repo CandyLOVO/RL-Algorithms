@@ -30,7 +30,8 @@ class PolicyValue(nn.Module):
         #Π_θ定义为高斯分布（μ：最优动作方向；δ）
         self.mean = nn.Linear(hidden_dim, action_dim) #将训练映射得到的动作特征定义为均值（动作中心）：杆子偏右->负力矩；偏左->正力矩
         #这里标记的参数是log(δ)，训练中被优化
-        self.log_std = nn.Parameter(torch.zeros(action_dim)) #长度位action_dim的零张量，标记为模型参数(nn.Parameter)，pytorch自动计算梯度
+        # self.log_std = nn.Parameter(torch.zeros(action_dim)) #长度位action_dim的零张量，标记为模型参数(nn.Parameter)，pytorch自动计算梯度
+        self.log_std = nn.Parameter(torch.ones(action_dim) * (-1.0)) #减小初始动作标准差
 
         #critic分支
         self.value = nn.Linear(hidden_dim, 1)
@@ -66,23 +67,26 @@ class PolicyValue(nn.Module):
         return log_prob, value, entropy
 
     def gae(self, rewards, values, done, lamb, gamma):
-        advantage = [] #优势函数
-        delta = np.zeros(len(rewards))
+        T = len(rewards)
+        advantage = np.zeros(T) #优势函数
+        returns = np.zeros(T)
+        values = np.array(values)
+
         ad = 0
-        for t in reversed(range(len(rewards))): #T-1~0 序列反转
-            delta[t] = rewards[t] + gamma * values[t+1] * (1 - done[t]) - values[t] #加入结束标记
-            ad = delta[t] + gamma * lamb * ad * (1 - done[t])
-            advantage.insert(0, ad)
-        returns = np.array(advantage) + np.array(values[:-1]) #截取到最后一个元素
-        returns = torch.tensor(returns)
-        advantage = torch.tensor(advantage)
+        for t in reversed(range(T)): #T-1~0 序列反转
+            delta = rewards[t] + gamma * values[t+1] * (1 - done[t]) - values[t] #加入结束标记
+            ad = delta + gamma * lamb * ad * (1 - done[t])
+            advantage[t] = ad
+        returns = advantage + values[:-1] #截取到最后一个元素
+        returns = torch.tensor(returns, dtype=torch.float32)
         advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8) #归一化，减小方差
+        advantage = torch.tensor(advantage, dtype=torch.float32)
         return advantage, returns
 
 s_dim = env.observation_space.shape[0]
 a_dim = env.action_space.shape[0]
 h_dim = 128
-clip = 0.2
+clip = 0.1
 c1 = 0.5
 c2 = 0.01
 lamb=0.95
@@ -90,7 +94,7 @@ gamma=0.99
 all_rewards = []
 
 policy = PolicyValue(s_dim, h_dim, a_dim)
-optimizer = optim.Adam(policy.parameters(), lr=0.0005) #两个网络共享优化器
+optimizer = optim.Adam(policy.parameters(), lr=0.0003) #两个网络共享优化器
 
 def ppo(memory):
     state = torch.tensor(memory.state).float()
@@ -99,7 +103,7 @@ def ppo(memory):
     returns = torch.tensor(memory.returns).float() #回归目标 At+Vst
     advantage = torch.tensor(memory.advantage).float()
     #环境交互回合，收集新数据memory---输入--->回合内，同一批数据重复次数，更新策略
-    for _ in range(20):
+    for _ in range(10):
         log_prob_new, value, entropy = policy.evaluate(state, action)
         ratio = torch.exp(log_prob_new - log_prob_old)
         l1 = ratio * advantage
@@ -113,10 +117,11 @@ def ppo(memory):
         loss.backward()
         optimizer.step() #更新策略网络＆价值网络的θ
 
-for episode in range(500): #回合数
-    state, info = env.reset()
+for episode in range(3000): #回合数
     memory = Memory()
+    state, info = env.reset()
     sum_rewards = 0
+
     for t in range(200): #单回合中最大交互次数，倒立摆done始终为False，没有终止状态
         # state_tensor = torch.tensor(state).float().unsqueeze(0) #转化为张量，增加批次维度
         state_tensor = torch.tensor(state, dtype=torch.float).view(1, -1)
