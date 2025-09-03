@@ -35,7 +35,7 @@ class PolicyValue(nn.Module):
         mean = self.mean(fea)
         std = self.log_std.exp() #储存的对数标准差转化为标准差
         dist = torch.distributions.Normal(mean, std) #连续动作空间中动作的概率分布
-        action = dist.sample() #采样动作
+        action = dist.sample() #动作采样
         log_prob = dist.log_prob(action) #动作对数频率log(Π_θ)
         action_tanh = torch.tanh(action) * a_max #限制action大小[-1,1]，线性映射无法估计取到的值可以映射到多少
         #抽样动作，压缩后的抽样动作，对数动作频率（.detach()不跟踪梯度，.cpu().numpy()转换为NumPy数组）
@@ -70,12 +70,32 @@ class PolicyValue(nn.Module):
 s_dim = env.observation_space.shape[0]
 a_dim = env.action_space.shape[0]
 h_dim = 128
+k_epoch = 20
+clip = 0.1
+c1 = 0.5
+c2 = 0.01
 
 policy = PolicyValue(s_dim, h_dim, a_dim)
 optimizer = optim.Adam(policy.parameters(), lr=0.001)
 
-def get_memory(memory):
+def ppo(memory):
     state = torch.tensor(memory.state).float()
     action = torch.tensor(memory.action).float()
-    reward = torch.tensor(memory.reward).float()
     log_prob_old = torch.tensor(memory.log_prob).float()
+    returns = torch.tensor(memory.returns).float()
+    advantage = torch.tensor(memory.advantage).float()
+    #环境交互回合，收集新数据memory---输入--->回合内，同一批数据重复次数k_epoch，更新策略
+    for _ in range(k_epoch):
+        log_prob_new, value, entropy = policy.evaluate(state, action)
+        ratio = torch.exp(log_prob_new - log_prob_old)
+        l1 = ratio * advantage
+        l2 = torch.clip(ratio, 1-clip, 1+clip) * advantage
+        l_clip = -torch.min(l1, l2) #策略项
+        l_value = torch.mean((value - returns)**2) #值函数项
+        l_entropy = -torch.mean(entropy) #熵项
+        loss = l_clip + c1 * l_value + c2 * l_entropy
+
+        optimizer.zero_grad() #梯度清零
+        loss.backward()
+        optimizer.step() #更新策略网络＆价值网络的θ
+
