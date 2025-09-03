@@ -8,6 +8,17 @@ import matplotlib.pyplot as plt
 env = gymnasium.make('Pendulum-v1')
 a_max = env.action_space.high
 
+class Memory(object):
+    def __init__(self):
+        self.state = []
+        self.action = []
+        self.reward = []
+        self.log_prob = []
+        self.value = []
+        self.done = []
+        self.advantage = []
+        self.returns = []
+
 class PolicyValue(nn.Module):
     def __init__(self, state_dim, hidden_dim, action_dim):
         super().__init__()
@@ -83,9 +94,9 @@ policy = PolicyValue(s_dim, h_dim, a_dim)
 optimizer = optim.Adam(policy.parameters(), lr=0.001) #两个网络共享优化器
 
 def ppo(memory):
-    state = torch.stack(memory['state'])
-    action = torch.stack(memory['action'])
-    log_prob_old = torch.stack(memory['log_prob'])
+    state = torch.tensor(memory.state).float()
+    action = torch.tensor(memory.action).float()
+    log_prob_old = torch.tensor(memory.log_prob).float()
     returns = torch.tensor(memory.returns).float() #回归目标 At+Vst
     advantage = torch.tensor(memory.advantage).float()
     #环境交互回合，收集新数据memory---输入--->回合内，同一批数据重复次数，更新策略
@@ -105,29 +116,30 @@ def ppo(memory):
 
 for episode in range(500): #回合数
     state, info = env.reset()
-    memory = {'state':[], 'action':[], 'log_prob':[], 'reward':[], 'value':[], 'done':[], 'advantage':[], 'returns':[]}
+    memory = Memory()
 
     for t in range(200): #单回合中最大交互次数，倒立摆done始终为False，没有终止状态
-        state_tensor = torch.tensor(state).float().unsqueeze(0) #转化为张量，增加批次维度
+        # state_tensor = torch.tensor(state).float().unsqueeze(0) #转化为张量，增加批次维度
+        state_tensor = torch.tensor(state, dtype=torch.float).view(1, -1)
         #计算旧策略数据，用于“锚点”，不需要参与梯度计算，参数固定，限制新策略更新幅度。否则，反向传播时会同时更新新策略和旧策略的参数，导致log_probs_old随训练动态变化。
         with torch.no_grad():
             action_tanh, action, log_prob = policy.get_action(state_tensor)
             fea = policy.forward(state_tensor) #隐藏层输出
             value = policy.value(fea) #隐藏层->输出层
 
-        state_new, reward, terminated, truncated, info = env.step(action_tanh) #T+1个state_new
+        action_env = action_tanh.detach().cpu().numpy().reshape(-1)
+        state_new, reward, terminated, truncated, info = env.step(action_env) #T+1个state_new
         done = terminated or truncated
 
-        memory['state'].append(state)
-        memory['action'].append(action.numpy())
-        memory['log_prob'].append(log_prob.detach().numpy())
-        memory['reward'].append(reward)
-        memory['value'].append(value.item())
-        memory['done'].append(done)
+        memory.state.append(state)
+        memory.action.append(action.numpy())
+        memory.log_prob.append(log_prob.detach().numpy())
+        memory.reward.append(reward)
+        memory.value.append(value.item())
+        memory.done.append(done)
 
         state = state_new
         sum_rewards += reward
-        all_rewards.append(sum_rewards)
         if done:
             break
 
@@ -135,13 +147,17 @@ for episode in range(500): #回合数
     with torch.no_grad():
         fea = policy.forward(state_tensor)  # 隐藏层输出
         value_final = policy.value(fea).item()  # 隐藏层->输出层
-    memory['value'].append(value_final)
+    memory.value.append(value_final)
 
-    advantage, returns = policy.gae(memory['reward'], memory['value'], memory['done'], lamb, gamma)
-    memory['advantage'] = advantage
-    memory['returns'] = returns
+    advantage, returns = policy.gae(memory.reward, memory.value, memory.done, lamb, gamma)
+    memory.advantage = advantage
+    memory.returns = returns
 
     ppo(memory)
+
+    all_rewards.append(sum_rewards)
+    if episode % 50 == 0:
+        print(f"Episode {episode}, total reward: {sum_rewards}")
 
 plt.plot(all_rewards)
 plt.xlabel('Episode')
