@@ -37,7 +37,7 @@ class PolicyValue(nn.Module):
         std = self.log_std.exp() #储存的对数标准差转化为标准差
         dist = torch.distributions.Normal(mean, std) #连续动作空间中动作的概率分布
         action = dist.sample() #动作采样
-        log_prob = dist.log_prob(action) #动作对数频率log(Π_θ)
+        log_prob = dist.log_prob(action).sum(-1, keepdim=True) #动作对数频率log(Π_θ)
         action_tanh = torch.tanh(action) * a_max #限制action大小[-1,1]，环境输入。线性映射无法估计取到的值可以映射到多少
         #抽样动作，压缩后的抽样动作，对数动作频率（.detach()不跟踪梯度，.cpu().numpy()转换为NumPy数组）
         return action_tanh, action, log_prob
@@ -48,7 +48,7 @@ class PolicyValue(nn.Module):
         mean = self.mean(fea)
         std = self.log_std.exp()
         dist = torch.distributions.Normal(mean, std)
-        log_prob = dist.log_prob(action)
+        log_prob = dist.log_prob(action).sum(-1, keepdim=True)
         entropy = dist.entropy() #熵值
         value = self.value(fea) #状态价值
         #对数动作频率，状态价值，熵值
@@ -62,7 +62,7 @@ class PolicyValue(nn.Module):
             delta[t] = rewards[t] + gamma * values[t+1] * (1 - done[t]) - values[t] #加入结束标记
             ad = delta[t] + gamma * lamb * ad * (1 - done[t])
             advantage.insert(0, ad)
-        returns = advantage + values[:-1] #截取到最后一个元素
+        returns = np.array(advantage) + np.array(values[:-1]) #截取到最后一个元素
         returns = torch.tensor(returns)
         advantage = torch.tensor(advantage)
         advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8) #归一化，减小方差
@@ -76,14 +76,16 @@ c1 = 0.5
 c2 = 0.01
 lamb=0.1
 gamma=0.99
+sum_rewards = 0
+all_rewards = []
 
 policy = PolicyValue(s_dim, h_dim, a_dim)
 optimizer = optim.Adam(policy.parameters(), lr=0.001) #两个网络共享优化器
 
 def ppo(memory):
-    state = torch.tensor(memory.state).float()
-    action = torch.tensor(memory.action).float()
-    log_prob_old = torch.tensor(memory.log_prob).float()
+    state = torch.stack(memory['state'])
+    action = torch.stack(memory['action'])
+    log_prob_old = torch.stack(memory['log_prob'])
     returns = torch.tensor(memory.returns).float() #回归目标 At+Vst
     advantage = torch.tensor(memory.advantage).float()
     #环境交互回合，收集新数据memory---输入--->回合内，同一批数据重复次数，更新策略
@@ -92,7 +94,7 @@ def ppo(memory):
         ratio = torch.exp(log_prob_new - log_prob_old)
         l1 = ratio * advantage
         l2 = torch.clip(ratio, 1-clip, 1+clip) * advantage
-        l_clip = -torch.min(l1, l2) #策略项
+        l_clip = -torch.mean(torch.min(l1, l2)) #策略项
         l_value = torch.mean((value - returns)**2) #值函数项
         l_entropy = -torch.mean(entropy) #熵项
         loss = l_clip + c1 * l_value + c2 * l_entropy
@@ -117,13 +119,15 @@ for episode in range(500): #回合数
         done = terminated or truncated
 
         memory['state'].append(state)
-        memory['action'].append(action)
-        memory['log_prob'].append(log_prob)
+        memory['action'].append(action.numpy())
+        memory['log_prob'].append(log_prob.detach().numpy())
         memory['reward'].append(reward)
         memory['value'].append(value.item())
         memory['done'].append(done)
 
         state = state_new
+        sum_rewards += reward
+        all_rewards.append(sum_rewards)
         if done:
             break
 
@@ -134,8 +138,12 @@ for episode in range(500): #回合数
     memory['value'].append(value_final)
 
     advantage, returns = policy.gae(memory['reward'], memory['value'], memory['done'], lamb, gamma)
-    memory['advantage'].append(advantage)
-    memory['returns'].append(returns)
+    memory['advantage'] = advantage
+    memory['returns'] = returns
 
     ppo(memory)
 
+plt.plot(all_rewards)
+plt.xlabel('Episode')
+plt.ylabel('Reward')
+plt.show()
