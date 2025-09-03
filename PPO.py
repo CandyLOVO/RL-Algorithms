@@ -82,16 +82,15 @@ class PolicyValue(nn.Module):
 s_dim = env.observation_space.shape[0]
 a_dim = env.action_space.shape[0]
 h_dim = 128
-clip = 0.1
+clip = 0.2
 c1 = 0.5
 c2 = 0.01
-lamb=0.1
+lamb=0.95
 gamma=0.99
-sum_rewards = 0
 all_rewards = []
 
 policy = PolicyValue(s_dim, h_dim, a_dim)
-optimizer = optim.Adam(policy.parameters(), lr=0.001) #两个网络共享优化器
+optimizer = optim.Adam(policy.parameters(), lr=0.0005) #两个网络共享优化器
 
 def ppo(memory):
     state = torch.tensor(memory.state).float()
@@ -117,7 +116,7 @@ def ppo(memory):
 for episode in range(500): #回合数
     state, info = env.reset()
     memory = Memory()
-
+    sum_rewards = 0
     for t in range(200): #单回合中最大交互次数，倒立摆done始终为False，没有终止状态
         # state_tensor = torch.tensor(state).float().unsqueeze(0) #转化为张量，增加批次维度
         state_tensor = torch.tensor(state, dtype=torch.float).view(1, -1)
@@ -155,9 +154,10 @@ for episode in range(500): #回合数
 
     ppo(memory)
 
-    all_rewards.append(sum_rewards)
+    ave_reward = sum_rewards/len(memory.reward)
+    all_rewards.append(ave_reward)
     if episode % 50 == 0:
-        print(f"Episode {episode}, total reward: {sum_rewards}")
+        print(f"Episode {episode}, total reward: {ave_reward}")
 
 plt.plot(all_rewards)
 plt.xlabel('Episode')
