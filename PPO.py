@@ -32,12 +32,13 @@ class PolicyValue(nn.Module):
     #动作采样——旧策略
     def get_action(self, state):
         fea = self.forward(state)
-        mean = self.mean(fea)
+        #隐藏层->输出层
+        mean = self.mean(fea) #动作均值
         std = self.log_std.exp() #储存的对数标准差转化为标准差
         dist = torch.distributions.Normal(mean, std) #连续动作空间中动作的概率分布
         action = dist.sample() #动作采样
         log_prob = dist.log_prob(action) #动作对数频率log(Π_θ)
-        action_tanh = torch.tanh(action) * a_max #限制action大小[-1,1]，线性映射无法估计取到的值可以映射到多少
+        action_tanh = torch.tanh(action) * a_max #限制action大小[-1,1]，环境输入。线性映射无法估计取到的值可以映射到多少
         #抽样动作，压缩后的抽样动作，对数动作频率（.detach()不跟踪梯度，.cpu().numpy()转换为NumPy数组）
         return action_tanh, action, log_prob
 
@@ -54,7 +55,7 @@ class PolicyValue(nn.Module):
         return log_prob, value, entropy
 
     def gae(self, rewards, values, done, lamb, gamma):
-        advantage = []
+        advantage = [] #优势函数
         delta = np.zeros(len(rewards))
         ad = 0
         for t in reversed(range(len(rewards))): #T-1~0 序列反转
@@ -73,6 +74,8 @@ h_dim = 128
 clip = 0.1
 c1 = 0.5
 c2 = 0.01
+lamb=0.1
+gamma=0.99
 
 policy = PolicyValue(s_dim, h_dim, a_dim)
 optimizer = optim.Adam(policy.parameters(), lr=0.001) #两个网络共享优化器
@@ -81,7 +84,7 @@ def ppo(memory):
     state = torch.tensor(memory.state).float()
     action = torch.tensor(memory.action).float()
     log_prob_old = torch.tensor(memory.log_prob).float()
-    returns = torch.tensor(memory.returns).float()
+    returns = torch.tensor(memory.returns).float() #回归目标 At+Vst
     advantage = torch.tensor(memory.advantage).float()
     #环境交互回合，收集新数据memory---输入--->回合内，同一批数据重复次数，更新策略
     for _ in range(20):
@@ -98,12 +101,41 @@ def ppo(memory):
         loss.backward()
         optimizer.step() #更新策略网络＆价值网络的θ
 
-for episode in range(1000): #回合数
+for episode in range(500): #回合数
     state, info = env.reset()
-    memory = {'state':[], 'action':[], 'log_prob':[], 'returns':[], 'advantage':[]}
+    memory = {'state':[], 'action':[], 'log_prob':[], 'reward':[], 'value':[], 'done':[], 'advantage':[], 'returns':[]}
 
     for t in range(200): #单回合中最大交互次数，倒立摆done始终为False，没有终止状态
         state_tensor = torch.tensor(state).float().unsqueeze(0) #转化为张量，增加批次维度
         #计算旧策略数据，用于“锚点”，不需要参与梯度计算，参数固定，限制新策略更新幅度。否则，反向传播时会同时更新新策略和旧策略的参数，导致log_probs_old随训练动态变化。
         with torch.no_grad():
             action_tanh, action, log_prob = policy.get_action(state_tensor)
+            fea = policy.forward(state_tensor) #隐藏层输出
+            value = policy.value(fea) #隐藏层->输出层
+
+        state_new, reward, terminated, truncated, info = env.step(action_tanh) #T+1个state_new
+        done = terminated or truncated
+
+        memory['state'].append(state)
+        memory['action'].append(action)
+        memory['log_prob'].append(log_prob)
+        memory['reward'].append(reward)
+        memory['value'].append(value.item())
+        memory['done'].append(done)
+
+        state = state_new
+        if done:
+            break
+
+    state_tensor = torch.tensor(state).float().unsqueeze(0)
+    with torch.no_grad():
+        fea = policy.forward(state_tensor)  # 隐藏层输出
+        value_final = policy.value(fea).item()  # 隐藏层->输出层
+    memory['value'].append(value_final)
+
+    advantage, returns = policy.gae(memory['reward'], memory['value'], memory['done'], lamb, gamma)
+    memory['advantage'].append(advantage)
+    memory['returns'].append(returns)
+
+    ppo(memory)
+
