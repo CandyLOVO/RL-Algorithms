@@ -70,13 +70,12 @@ class PolicyValue(nn.Module):
 s_dim = env.observation_space.shape[0]
 a_dim = env.action_space.shape[0]
 h_dim = 128
-k_epoch = 20
 clip = 0.1
 c1 = 0.5
 c2 = 0.01
 
 policy = PolicyValue(s_dim, h_dim, a_dim)
-optimizer = optim.Adam(policy.parameters(), lr=0.001)
+optimizer = optim.Adam(policy.parameters(), lr=0.001) #两个网络共享优化器
 
 def ppo(memory):
     state = torch.tensor(memory.state).float()
@@ -84,8 +83,8 @@ def ppo(memory):
     log_prob_old = torch.tensor(memory.log_prob).float()
     returns = torch.tensor(memory.returns).float()
     advantage = torch.tensor(memory.advantage).float()
-    #环境交互回合，收集新数据memory---输入--->回合内，同一批数据重复次数k_epoch，更新策略
-    for _ in range(k_epoch):
+    #环境交互回合，收集新数据memory---输入--->回合内，同一批数据重复次数，更新策略
+    for _ in range(20):
         log_prob_new, value, entropy = policy.evaluate(state, action)
         ratio = torch.exp(log_prob_new - log_prob_old)
         l1 = ratio * advantage
@@ -99,3 +98,12 @@ def ppo(memory):
         loss.backward()
         optimizer.step() #更新策略网络＆价值网络的θ
 
+for episode in range(1000): #回合数
+    state, info = env.reset()
+    memory = {'state':[], 'action':[], 'log_prob':[], 'returns':[], 'advantage':[]}
+
+    for t in range(200): #单回合中最大交互次数，倒立摆done始终为False，没有终止状态
+        state_tensor = torch.tensor(state).float().unsqueeze(0) #转化为张量，增加批次维度
+        #计算旧策略数据，用于“锚点”，不需要参与梯度计算，参数固定，限制新策略更新幅度。否则，反向传播时会同时更新新策略和旧策略的参数，导致log_probs_old随训练动态变化。
+        with torch.no_grad():
+            action_tanh, action, log_prob = policy.get_action(state_tensor)
