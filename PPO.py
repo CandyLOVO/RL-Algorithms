@@ -137,7 +137,7 @@ def ppo(memory, batch_size):
             optimizer.step() #更新策略网络＆价值网络的θ
 
 #主函数
-for episode in range(3000): #回合数
+for episode in range(5000): #回合数
     memory = Memory()
     state, info = env.reset()
     sum_rewards = 0
@@ -177,7 +177,7 @@ for episode in range(3000): #回合数
     memory.advantage = advantage
     memory.returns = returns
 
-    ppo(memory, 50)
+    ppo(memory, 64)
 
     ave_reward = sum_rewards/len(memory.reward)
     all_rewards.append(ave_reward)
