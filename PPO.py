@@ -2,11 +2,10 @@ import gymnasium
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.optim as optim
 import matplotlib.pyplot as plt
 
 env = gymnasium.make('Pendulum-v1')
-s_dim = env.observation_space.shape[0]
-a_dim = env.action_space.shape[0]
 a_max = env.action_space.high
 
 class PolicyValue(nn.Module):
@@ -53,3 +52,30 @@ class PolicyValue(nn.Module):
         value = self.value(fea) #状态价值
         #对数动作频率，状态价值，熵值
         return log_prob, value, entropy
+
+    def gae(self, rewards, values, done, lamb, gamma):
+        advantage = []
+        delta = np.zeros(len(rewards))
+        ad = 0
+        for t in reversed(range(len(rewards))): #T-1~0 序列反转
+            delta[t] = rewards[t] + gamma * values[t+1] * (1 - done[t]) - values[t] #加入结束标记
+            ad = delta[t] + gamma * lamb * ad * (1 - done[t])
+            advantage.insert(0, ad)
+        returns = advantage + values[:-1] #截取到最后一个元素
+        returns = torch.tensor(returns)
+        advantage = torch.tensor(advantage)
+        advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8) #归一化，减小方差
+        return advantage, returns
+
+s_dim = env.observation_space.shape[0]
+a_dim = env.action_space.shape[0]
+h_dim = 128
+
+policy = PolicyValue(s_dim, h_dim, a_dim)
+optimizer = optim.Adam(policy.parameters(), lr=0.001)
+
+def get_memory(memory):
+    state = torch.tensor(memory.state).float()
+    action = torch.tensor(memory.action).float()
+    reward = torch.tensor(memory.reward).float()
+    log_prob_old = torch.tensor(memory.log_prob).float()
