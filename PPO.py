@@ -96,27 +96,47 @@ all_rewards = []
 policy = PolicyValue(s_dim, h_dim, a_dim)
 optimizer = optim.Adam(policy.parameters(), lr=0.0003) #两个网络共享优化器
 
-def ppo(memory):
+def ppo(memory, batch_size):
     state = torch.tensor(memory.state).float()
     action = torch.tensor(memory.action).float()
     log_prob_old = torch.tensor(memory.log_prob).float()
     returns = torch.tensor(memory.returns).float() #回归目标 At+Vst
     advantage = torch.tensor(memory.advantage).float()
+
+    N = state.shape[0]
+
     #环境交互回合，收集新数据memory---输入--->回合内，同一批数据重复次数，更新策略
     for _ in range(10):
-        log_prob_new, value, entropy = policy.evaluate(state, action)
-        ratio = torch.exp(log_prob_new - log_prob_old)
-        l1 = ratio * advantage
-        l2 = torch.clip(ratio, 1-clip, 1+clip) * advantage
-        l_clip = -torch.mean(torch.min(l1, l2)) #策略项
-        l_value = torch.mean((value - returns)**2) #值函数项
-        l_entropy = -torch.mean(entropy) #熵项
-        loss = l_clip + c1 * l_value + c2 * l_entropy
+        #数据随机打乱
+        indices = torch.randperm(N) #打乱后的索引顺序
+        state = state[indices] #数据按随机索引重新排列
+        action = action[indices]
+        log_prob_old = log_prob_old[indices]
+        returns = returns[indices]
+        advantage = advantage[indices]
 
-        optimizer.zero_grad() #梯度清零
-        loss.backward()
-        optimizer.step() #更新策略网络＆价值网络的θ
+        for start in range(0, N, batch_size):
+            end = start + batch_size
+            state_batch = state[start:end]
+            action_batch = action[start:end]
+            log_prob_old_batch = log_prob_old[start:end]
+            returns_batch = returns[start:end]
+            advantage_batch = advantage[start:end]
 
+            log_prob_new, value, entropy = policy.evaluate(state_batch, action_batch)
+            ratio = torch.exp(log_prob_new - log_prob_old_batch)
+            l1 = ratio * advantage_batch
+            l2 = torch.clip(ratio, 1-clip, 1+clip) * advantage_batch
+            l_clip = -torch.mean(torch.min(l1, l2)) #策略项
+            l_value = torch.mean((value.squeeze() - returns_batch)**2) #值函数项
+            l_entropy = -torch.mean(entropy) #熵项
+            loss = l_clip + c1 * l_value + c2 * l_entropy
+
+            optimizer.zero_grad() #梯度清零
+            loss.backward()
+            optimizer.step() #更新策略网络＆价值网络的θ
+
+#主函数
 for episode in range(3000): #回合数
     memory = Memory()
     state, info = env.reset()
@@ -157,7 +177,7 @@ for episode in range(3000): #回合数
     memory.advantage = advantage
     memory.returns = returns
 
-    ppo(memory)
+    ppo(memory, 50)
 
     ave_reward = sum_rewards/len(memory.reward)
     all_rewards.append(ave_reward)
