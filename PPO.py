@@ -77,7 +77,6 @@ class PolicyValue(nn.Module):
     def gae(self, rewards, values, done, lamb, gamma):
         T = len(rewards)
         advantage = np.zeros(T) #优势函数
-        returns = np.zeros(T)
         values = np.array(values)
 
         ad = 0
@@ -85,6 +84,7 @@ class PolicyValue(nn.Module):
             delta = rewards[t] + gamma * (1 - done[t]) * values[t+1] - values[t] #加入结束标记
             ad = delta + gamma * lamb * ad * (1 - done[t])
             advantage[t] = ad
+        #values: T+1 ; advantage: T ; returns: T ; rewards: T
         returns = advantage + values[:-1] #截取到最后一个元素
         returns = torch.tensor(returns, dtype=torch.float32)
         advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8) #归一化，减小方差
@@ -94,13 +94,6 @@ class PolicyValue(nn.Module):
 s_dim = env.observation_space.shape[0]
 a_dim = env.action_space.shape[0]
 h_dim = 128
-clip = 0.2
-c1 = 0.5
-c2 = 0.01
-lamb=0.95
-gamma=0.99
-all_rewards = []
-
 policy = PolicyValue(s_dim, h_dim, a_dim)
 optimizer = optim.Adam(policy.parameters(), lr=0.001) #两个网络共享优化器
 
@@ -144,9 +137,19 @@ def ppo(memory, batch_size):
             loss.backward()
             optimizer.step() #更新策略网络＆价值网络的θ
 
-#主函数
+#-------------------------------主函数-------------------------------#
+clip = 0.2
+c1 = 0.5
+c2 = 0.01
+lamb=0.95
+gamma=0.99
+all_rewards = []
+step_update = 2048
+global_step = 0
+global_memory = Memory()
+
 for episode in range(1000): #回合数
-    memory = Memory()
+    # memory = Memory()
     state, info = env.reset()
     sum_rewards = 0
 
@@ -163,15 +166,23 @@ for episode in range(1000): #回合数
         state_new, reward, terminated, truncated, info = env.step(action_env) #T+1个state_new
         done = terminated or truncated
 
-        memory.state.append(state)
-        memory.action.append(action.squeeze(0).cpu().numpy())
-        memory.log_prob.append(log_prob.squeeze(0).detach().cpu().numpy())
-        memory.reward.append(reward)
-        memory.value.append(value.item())
-        memory.done.append(done)
+        # memory.state.append(state)
+        # memory.action.append(action.squeeze(0).cpu().numpy())
+        # memory.log_prob.append(log_prob.squeeze(0).detach().cpu().numpy())
+        # memory.reward.append(reward)
+        # memory.value.append(value.item())
+        # memory.done.append(done)
+
+        global_memory.state.append(state)
+        global_memory.action.append(action.squeeze(0).cpu().numpy())
+        global_memory.log_prob.append(log_prob.squeeze(0).cpu().numpy())
+        global_memory.reward.append(reward)
+        global_memory.value.append(value.item())
+        global_memory.done.append(done)
 
         state = state_new
         sum_rewards += reward
+        global_step += 1
         if done:
             break
 
@@ -179,7 +190,8 @@ for episode in range(1000): #回合数
     with torch.no_grad():
         fea = policy.forward(state_tensor)  # 隐藏层输出
         value_final = policy.value(fea).item()  # 隐藏层->输出层
-    memory.value.append(value_final)
+    # memory.value.append(value_final)
+    global_memory.value.append(value_final)
 
     # #reward标准化
     # reward_np = np.array(memory.reward)
@@ -188,16 +200,24 @@ for episode in range(1000): #回合数
     # reward_normalized = (reward_np - reward_mean) / reward_std
     # advantage, returns = policy.gae(reward_normalized, memory.value, memory.done, lamb, gamma)
 
-    advantage, returns = policy.gae(memory.reward, memory.value, memory.done, lamb, gamma)
-    memory.advantage = advantage
-    memory.returns = returns
+    if global_step >= step_update:
+        advantage, returns = policy.gae(global_memory.reward, global_memory.value, global_memory.done, lamb, gamma)
+        global_memory.advantage = advantage
+        global_memory.returns = returns
+        ppo(global_memory, 64)
 
-    ppo(memory, 64)
+        global_memory = Memory()
+        global_step = 0
+
+    # advantage, returns = policy.gae(memory.reward, memory.value, memory.done, lamb, gamma)
+    # memory.advantage = advantage
+    # memory.returns = returns
+    # ppo(memory, 64)
 
     all_rewards.append(sum_rewards)
     if episode % 100 == 0:
         print(f"Episode {episode}, total reward: {sum_rewards}")
-    ave_reward = sum_rewards / len(memory.reward)
+    ave_reward = sum_rewards / len(global_memory.reward)
     print(f"Episode {episode}, total reward: {ave_reward}")
 
 plt.plot(all_rewards)
