@@ -59,15 +59,21 @@ class PolicyValue(nn.Module):
         return action_tanh, action, log_prob
 
     #策略评估——同一(s,a)下新策略
-    def evaluate(self, state, action):
+    def evaluate(self, state, action_tanh):
         fea = self.forward(state)
         mean = self.mean(fea)
         std = self.log_std.exp()
         dist = torch.distributions.Normal(mean, std)
-        log_prob = dist.log_prob(action).sum(-1, keepdim=True)
-        # tanh修正项: -sum(log(1 - tanh(u)^2 + eps))
+        # log_prob = dist.log_prob(action).sum(-1, keepdim=True)
+        # # tanh修正项: -sum(log(1 - tanh(u)^2 + eps))
+        # eps = 1e-6
+        # log_prob -= torch.log(1 - torch.tanh(action).pow(2) + eps).sum(-1, keepdim=True)
+
+        #改为输入action_tanh
         eps = 1e-6
-        log_prob -= torch.log(1 - torch.tanh(action).pow(2) + eps).sum(-1, keepdim=True)
+        u = torch.atanh(torch.clamp(action_tanh / a_max, -1 + eps, 1 - eps)) #把action_tanh反推回u = atanh(action_tanh/a_max)
+        log_prob = dist.log_prob(u).sum(-1, keepdim=True)
+        log_prob -= torch.log(1 - torch.tanh(u).pow(2) + eps).sum(-1, keepdim=True)
 
         entropy = dist.entropy().sum(-1, keepdim=True) #熵值
         value = self.value(fea) #状态价值
@@ -105,7 +111,7 @@ s_dim = env.observation_space.shape[0]
 a_dim = env.action_space.shape[0]
 h_dim = 128
 policy = PolicyValue(s_dim, h_dim, a_dim)
-optimizer = optim.Adam(policy.parameters(), lr=0.001) #两个网络共享优化器
+optimizer = optim.Adam(policy.parameters(), lr=0.0003) #两个网络共享优化器
 
 def ppo(memory, batch_size):
     state = torch.tensor(memory.state).float()
@@ -117,7 +123,7 @@ def ppo(memory, batch_size):
     N = state.shape[0]
 
     #环境交互回合，收集新数据memory---输入--->回合内，同一批数据重复次数，更新策略
-    for _ in range(10):
+    for _ in range(4):
         #数据随机打乱
         indices = torch.randperm(N) #打乱后的索引顺序
         state = state[indices] #数据按随机索引重新排列
@@ -158,7 +164,7 @@ step_update = 2048
 global_step = 0
 global_memory = Memory()
 
-for episode in range(1000): #回合数
+for episode in range(3000): #回合数
     # memory = Memory()
     state, info = env.reset()
     sum_rewards = 0
@@ -184,7 +190,8 @@ for episode in range(1000): #回合数
         # memory.done.append(done)
 
         global_memory.state.append(state)
-        global_memory.action.append(action.squeeze(0).cpu().numpy())
+        # global_memory.action.append(action.squeeze(0).cpu().numpy())
+        global_memory.action.append(action_env) #存action_env即action_tanh，与环境一致
         global_memory.log_prob.append(log_prob.squeeze(0).cpu().numpy())
         global_memory.reward.append(reward)
         global_memory.value.append(value.item())
@@ -229,6 +236,8 @@ for episode in range(1000): #回合数
     # ave_reward = sum_rewards / len(global_memory.reward)
     # print(f"Episode {episode}, total reward: {ave_reward}")
 
+# window = 20
+# plt.plot(np.convolve(all_rewards, np.ones(window) / window, mode='valid')) #滑动平滑画reward
 plt.plot(all_rewards)
 plt.xlabel('Episode')
 plt.ylabel('Reward')
