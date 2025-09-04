@@ -54,6 +54,7 @@ class PolicyValue(nn.Module):
         #tanh修正项: -sum(log(1 - tanh(u)^2 + eps))
         eps = 1e-6
         log_prob -= torch.log(1 - torch.tanh(action).pow(2) + eps).sum(-1, keepdim=True)
+
         #抽样动作，压缩后的抽样动作，对数动作频率（.detach()不跟踪梯度，.cpu().numpy()转换为NumPy数组）
         return action_tanh, action, log_prob
 
@@ -81,11 +82,7 @@ class PolicyValue(nn.Module):
 
         ad = 0
         for t in reversed(range(T)): #T-1~0 序列反转
-            if done[t]:
-                next_value = 0
-            else:
-                next_value = values[t+1]
-            delta = rewards[t] + gamma * next_value - values[t] #加入结束标记
+            delta = rewards[t] + gamma * (1 - done[t]) * values[t+1] - values[t] #加入结束标记
             ad = delta + gamma * lamb * ad * (1 - done[t])
             advantage[t] = ad
         returns = advantage + values[:-1] #截取到最后一个元素
@@ -129,7 +126,7 @@ def ppo(memory, batch_size):
         for start in range(0, N, batch_size):
             end = start + batch_size
             state_batch = state[start:end]
-            action_batch = action[start:end]
+            action_batch = action[start:end] #未tanh的action
             log_prob_old_batch = log_prob_old[start:end]
             returns_batch = returns[start:end]
             advantage_batch = advantage[start:end]
@@ -154,8 +151,8 @@ for episode in range(1000): #回合数
     sum_rewards = 0
 
     for t in range(200): #单回合中最大交互次数，倒立摆done始终为False，没有终止状态
-        # state_tensor = torch.tensor(state).float().unsqueeze(0) #转化为张量，增加批次维度
-        state_tensor = torch.tensor(state, dtype=torch.float).view(1, -1)
+        state_tensor = torch.tensor(state).float().unsqueeze(0) #转化为张量，增加批次维度
+        # state_tensor = torch.tensor(state, dtype=torch.float).view(1, -1)
         #计算旧策略数据，用于“锚点”，不需要参与梯度计算，参数固定，限制新策略更新幅度。否则，反向传播时会同时更新新策略和旧策略的参数，导致log_probs_old随训练动态变化。
         with torch.no_grad():
             action_tanh, action, log_prob = policy.get_action(state_tensor)
@@ -167,8 +164,8 @@ for episode in range(1000): #回合数
         done = terminated or truncated
 
         memory.state.append(state)
-        memory.action.append(action.cpu().numpy())
-        memory.log_prob.append(log_prob.detach().numpy())
+        memory.action.append(action.squeeze(0).cpu().numpy())
+        memory.log_prob.append(log_prob.squeeze(0).detach().cpu().numpy())
         memory.reward.append(reward)
         memory.value.append(value.item())
         memory.done.append(done)
@@ -184,14 +181,14 @@ for episode in range(1000): #回合数
         value_final = policy.value(fea).item()  # 隐藏层->输出层
     memory.value.append(value_final)
 
-    #reward标准化
-    reward_np = np.array(memory.reward)
-    reward_mean = np.mean(reward_np)
-    reward_std = np.std(reward_np) + 1e-8
-    reward_normalized = (reward_np - reward_mean) / reward_std
+    # #reward标准化
+    # reward_np = np.array(memory.reward)
+    # reward_mean = np.mean(reward_np)
+    # reward_std = np.std(reward_np) + 1e-8
+    # reward_normalized = (reward_np - reward_mean) / reward_std
+    # advantage, returns = policy.gae(reward_normalized, memory.value, memory.done, lamb, gamma)
 
-    advantage, returns = policy.gae(reward_normalized, memory.value, memory.done, lamb, gamma)
-    # advantage, returns = policy.gae(memory.reward, memory.value, memory.done, lamb, gamma)
+    advantage, returns = policy.gae(memory.reward, memory.value, memory.done, lamb, gamma)
     memory.advantage = advantage
     memory.returns = returns
 
@@ -201,7 +198,6 @@ for episode in range(1000): #回合数
     if episode % 100 == 0:
         print(f"Episode {episode}, total reward: {sum_rewards}")
     ave_reward = sum_rewards / len(memory.reward)
-    all_rewards.append(ave_reward)
     print(f"Episode {episode}, total reward: {ave_reward}")
 
 plt.plot(all_rewards)
