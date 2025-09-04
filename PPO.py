@@ -37,8 +37,8 @@ class PolicyValue(nn.Module):
         self.value = nn.Linear(hidden_dim, 1)
 
     def forward(self, x): #x：环境参数
-        x = torch.tanh(self.fc1(x)) #输出范围[-1,1]
-        x = torch.tanh(self.fc2(x))
+        x = torch.relu(self.fc1(x))
+        x = torch.relu(self.fc2(x))
         return x #网络训练输出,actor、critic共同输入，特征共享
 
     #动作采样——旧策略
@@ -68,7 +68,7 @@ class PolicyValue(nn.Module):
         eps = 1e-6
         log_prob -= torch.log(1 - torch.tanh(action).pow(2) + eps).sum(-1, keepdim=True)
 
-        entropy = dist.entropy() #熵值
+        entropy = dist.entropy().sum(-1, keepdim=True) #熵值
         value = self.value(fea) #状态价值
         #对数动作频率，状态价值，熵值
         return log_prob, value, entropy
@@ -81,7 +81,11 @@ class PolicyValue(nn.Module):
 
         ad = 0
         for t in reversed(range(T)): #T-1~0 序列反转
-            delta = rewards[t] + gamma * values[t+1] * (1 - done[t]) - values[t] #加入结束标记
+            if done[t]:
+                next_value = 0
+            else:
+                next_value = values[t+1]
+            delta = rewards[t] + gamma * next_value - values[t] #加入结束标记
             ad = delta + gamma * lamb * ad * (1 - done[t])
             advantage[t] = ad
         returns = advantage + values[:-1] #截取到最后一个元素
@@ -94,14 +98,14 @@ s_dim = env.observation_space.shape[0]
 a_dim = env.action_space.shape[0]
 h_dim = 128
 clip = 0.2
-c1 = 0.9
+c1 = 0.5
 c2 = 0.01
-lamb=0.98
+lamb=0.95
 gamma=0.99
 all_rewards = []
 
 policy = PolicyValue(s_dim, h_dim, a_dim)
-optimizer = optim.Adam(policy.parameters(), lr=0.00005) #两个网络共享优化器
+optimizer = optim.Adam(policy.parameters(), lr=0.001) #两个网络共享优化器
 
 def ppo(memory, batch_size):
     state = torch.tensor(memory.state).float()
@@ -113,7 +117,7 @@ def ppo(memory, batch_size):
     N = state.shape[0]
 
     #环境交互回合，收集新数据memory---输入--->回合内，同一批数据重复次数，更新策略
-    for _ in range(5):
+    for _ in range(10):
         #数据随机打乱
         indices = torch.randperm(N) #打乱后的索引顺序
         state = state[indices] #数据按随机索引重新排列
@@ -144,7 +148,7 @@ def ppo(memory, batch_size):
             optimizer.step() #更新策略网络＆价值网络的θ
 
 #主函数
-for episode in range(2000): #回合数
+for episode in range(1000): #回合数
     memory = Memory()
     state, info = env.reset()
     sum_rewards = 0
@@ -187,15 +191,18 @@ for episode in range(2000): #回合数
     reward_normalized = (reward_np - reward_mean) / reward_std
 
     advantage, returns = policy.gae(reward_normalized, memory.value, memory.done, lamb, gamma)
+    # advantage, returns = policy.gae(memory.reward, memory.value, memory.done, lamb, gamma)
     memory.advantage = advantage
     memory.returns = returns
 
-    ppo(memory, 128)
+    ppo(memory, 64)
 
-    # ave_reward = sum_rewards/len(memory.reward)
     all_rewards.append(sum_rewards)
-    if episode % 50 == 0:
+    if episode % 100 == 0:
         print(f"Episode {episode}, total reward: {sum_rewards}")
+    ave_reward = sum_rewards / len(memory.reward)
+    all_rewards.append(ave_reward)
+    print(f"Episode {episode}, total reward: {ave_reward}")
 
 plt.plot(all_rewards)
 plt.xlabel('Episode')
