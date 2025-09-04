@@ -180,7 +180,13 @@ for episode in range(2000): #回合数
         value_final = policy.value(fea).item()  # 隐藏层->输出层
     memory.value.append(value_final)
 
-    advantage, returns = policy.gae(memory.reward, memory.value, memory.done, lamb, gamma)
+    #reward标准化
+    reward_np = np.array(memory.reward)
+    reward_mean = np.mean(reward_np)
+    reward_std = np.std(reward_np) + 1e-8
+    reward_normalized = (reward_np - reward_mean) / reward_std
+
+    advantage, returns = policy.gae(reward_normalized, memory.value, memory.done, lamb, gamma)
     memory.advantage = advantage
     memory.returns = returns
 
