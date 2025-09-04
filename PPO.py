@@ -93,15 +93,15 @@ class PolicyValue(nn.Module):
 s_dim = env.observation_space.shape[0]
 a_dim = env.action_space.shape[0]
 h_dim = 128
-clip = 0.25
-c1 = 0.5
+clip = 0.2
+c1 = 0.9
 c2 = 0.01
-lamb=0.95
+lamb=0.98
 gamma=0.99
 all_rewards = []
 
 policy = PolicyValue(s_dim, h_dim, a_dim)
-optimizer = optim.Adam(policy.parameters(), lr=0.0001) #两个网络共享优化器
+optimizer = optim.Adam(policy.parameters(), lr=0.00005) #两个网络共享优化器
 
 def ppo(memory, batch_size):
     state = torch.tensor(memory.state).float()
@@ -184,7 +184,7 @@ for episode in range(2000): #回合数
     memory.advantage = advantage
     memory.returns = returns
 
-    ppo(memory, 64)
+    ppo(memory, 128)
 
     # ave_reward = sum_rewards/len(memory.reward)
     all_rewards.append(sum_rewards)
