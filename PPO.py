@@ -31,7 +31,7 @@ class PolicyValue(nn.Module):
         self.mean = nn.Linear(hidden_dim, action_dim) #将训练映射得到的动作特征定义为均值（动作中心）：杆子偏右->负力矩；偏左->正力矩
         #这里标记的参数是log(δ)，训练中被优化
         # self.log_std = nn.Parameter(torch.zeros(action_dim)) #长度位action_dim的零张量，标记为模型参数(nn.Parameter)，pytorch自动计算梯度
-        self.log_std = nn.Parameter(torch.ones(action_dim) * (-1.0)) #减小初始动作标准差
+        self.log_std = nn.Parameter(torch.zeros(action_dim)) #减小初始动作标准差
 
         #critic分支
         self.value = nn.Linear(hidden_dim, 1)
@@ -93,7 +93,7 @@ class PolicyValue(nn.Module):
 s_dim = env.observation_space.shape[0]
 a_dim = env.action_space.shape[0]
 h_dim = 128
-clip = 0.1
+clip = 0.25
 c1 = 0.5
 c2 = 0.01
 lamb=0.95
@@ -101,7 +101,7 @@ gamma=0.99
 all_rewards = []
 
 policy = PolicyValue(s_dim, h_dim, a_dim)
-optimizer = optim.Adam(policy.parameters(), lr=0.0003) #两个网络共享优化器
+optimizer = optim.Adam(policy.parameters(), lr=0.0001) #两个网络共享优化器
 
 def ppo(memory, batch_size):
     state = torch.tensor(memory.state).float()
@@ -113,7 +113,7 @@ def ppo(memory, batch_size):
     N = state.shape[0]
 
     #环境交互回合，收集新数据memory---输入--->回合内，同一批数据重复次数，更新策略
-    for _ in range(10):
+    for _ in range(5):
         #数据随机打乱
         indices = torch.randperm(N) #打乱后的索引顺序
         state = state[indices] #数据按随机索引重新排列
@@ -186,10 +186,10 @@ for episode in range(2000): #回合数
 
     ppo(memory, 64)
 
-    ave_reward = sum_rewards/len(memory.reward)
-    all_rewards.append(ave_reward)
+    # ave_reward = sum_rewards/len(memory.reward)
+    all_rewards.append(sum_rewards)
     if episode % 50 == 0:
-        print(f"Episode {episode}, total reward: {ave_reward}")
+        print(f"Episode {episode}, total reward: {sum_rewards}")
 
 plt.plot(all_rewards)
 plt.xlabel('Episode')
