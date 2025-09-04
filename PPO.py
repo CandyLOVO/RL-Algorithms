@@ -111,8 +111,9 @@ class PolicyValue(nn.Module):
 s_dim = env.observation_space.shape[0]
 a_dim = env.action_space.shape[0]
 h_dim = 128
+lr_optim = 0.001
 policy = PolicyValue(s_dim, h_dim, a_dim)
-optimizer = optim.Adam(policy.parameters(), lr=0.0003) #两个网络共享优化器
+optimizer = optim.Adam(policy.parameters(), lr_optim) #两个网络共享优化器
 
 def ppo(memory, batch_size):
     state = torch.tensor(memory.state).float()
@@ -160,12 +161,13 @@ c1 = 0.5
 c2 = 0.01
 lamb=0.95
 gamma=0.99
+batch_size = 64
 all_rewards = []
 step_update = 2048
 global_step = 0
 global_memory = Memory()
 
-for episode in range(3000): #回合数
+for episode in range(1000): #回合数
     # memory = Memory()
     state, info = env.reset()
     sum_rewards = 0
@@ -222,7 +224,7 @@ for episode in range(3000): #回合数
         advantage, returns = policy.gae(global_memory.reward, global_memory.value, global_memory.done, lamb, gamma)
         global_memory.advantage = advantage
         global_memory.returns = returns
-        ppo(global_memory, 64)
+        ppo(global_memory, batch_size)
 
         global_memory = Memory()
         global_step = 0
@@ -242,4 +244,6 @@ for episode in range(3000): #回合数
 plt.plot(all_rewards)
 plt.xlabel('Episode')
 plt.ylabel('Reward')
+text = f"lr: {lr_optim}\nbatch_size: {batch_size}"
+plt.text(x=1500, y=-700, s=text)
 plt.show()
