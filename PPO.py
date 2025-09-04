@@ -107,6 +107,43 @@ class PolicyValue(nn.Module):
         advantage = torch.tensor(advantage, dtype=torch.float32)
         return advantage, returns
 
+#加入奖励缩放，对reward做折扣累计归一化
+class RunningMeanStd:
+    def __init__(self, shape):
+        self.n = 0
+        self.mean = np.zeros(shape, dtype=np.float64)
+        self.S = np.zeros(shape, dtype=np.float64)
+        self.std = np.sqrt(self.S)
+
+    def update(self, x):
+        x = np.array(x, dtype=np.float64)
+        self.n += 1
+        if self.n == 1:
+            self.mean = x
+            self.std = x
+        else:
+            old_mean = self.mean.copy()
+            self.mean = old_mean + (x - old_mean) / self.n
+            self.S = self.S + (x - old_mean) * (x - self.mean)
+            self.std = np.sqrt(self.S / self.n)
+class RewardScaling:
+    def __init__(self, shape, gamma):
+        self.shape = shape
+        self.gamma = gamma
+        self.running_ms = RunningMeanStd(shape=self.shape)
+        self.R = np.zeros(self.shape)
+
+    def __call__(self, x):
+        # 把 reward 加权累积后做缩放
+        self.R = self.gamma * self.R + x
+        self.running_ms.update(self.R)
+        x = x / (self.running_ms.std + 1e-8)
+        return x
+
+    def reset(self):
+        self.R = np.zeros(self.shape)
+
+#-------------------------------定义PPO函数-------------------------------#
 s_dim = env.observation_space.shape[0]
 a_dim = env.action_space.shape[0]
 h_dim = 128
@@ -163,11 +200,14 @@ all_rewards = []
 step_update = 2048
 global_step = 0
 global_memory = Memory()
+reward_scaling = RewardScaling(shape=1, gamma=0.99)
 
 for episode in range(3000): #回合数
     # memory = Memory()
     state, info = env.reset()
     sum_rewards = 0
+
+    reward_scaling.reset() #每轮reset
 
     for t in range(200): #单回合中最大交互次数，倒立摆done始终为False，没有终止状态
         state_tensor = torch.tensor(state).float().unsqueeze(0) #转化为张量，增加批次维度
@@ -182,6 +222,8 @@ for episode in range(3000): #回合数
         state_new, reward, terminated, truncated, info = env.step(action_env) #T+1个state_new
         done = terminated or truncated
 
+        reward = reward_scaling(reward)
+
         # memory.state.append(state)
         # memory.action.append(action.squeeze(0).cpu().numpy())
         # memory.log_prob.append(log_prob.squeeze(0).detach().cpu().numpy())
@@ -193,7 +235,7 @@ for episode in range(3000): #回合数
         # global_memory.action.append(action.squeeze(0).cpu().numpy())
         global_memory.action.append(action_env) #存action_env即action_tanh，与环境一致
         global_memory.log_prob.append(log_prob.squeeze(0).cpu().numpy())
-        global_memory.reward.append(reward)
+        global_memory.reward.append(reward) #存经过缩放归一的奖励[-1, 1]左右
         global_memory.value.append(value.item())
         global_memory.done.append(done)
 
