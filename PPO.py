@@ -75,6 +75,16 @@ class PolicyValue(nn.Module):
         return log_prob, value, entropy
 
     def gae(self, rewards, values, done, lamb, gamma):
+        #修正多回合导致的长度问题
+        rewards = np.array(rewards, dtype=np.float32)
+        values = np.array(values, dtype=np.float32)
+        done = np.array(done, dtype=np.float32)
+
+        if len(values) == len(rewards):
+            values = np.append(values, values[-1]) #没有多存，values末尾加0，让values长度比rewards多1
+        elif len(values) > len(rewards)+1:
+            values = values[:len(rewards)+1] #多存，切片截断values
+
         T = len(rewards)
         advantage = np.zeros(T) #优势函数
         values = np.array(values)
@@ -215,10 +225,9 @@ for episode in range(1000): #回合数
     # ppo(memory, 64)
 
     all_rewards.append(sum_rewards)
-    if episode % 100 == 0:
-        print(f"Episode {episode}, total reward: {sum_rewards}")
-    ave_reward = sum_rewards / len(global_memory.reward)
-    print(f"Episode {episode}, total reward: {ave_reward}")
+    print(f"Episode {episode}, total reward: {sum_rewards}")
+    # ave_reward = sum_rewards / len(global_memory.reward)
+    # print(f"Episode {episode}, total reward: {ave_reward}")
 
 plt.plot(all_rewards)
 plt.xlabel('Episode')
