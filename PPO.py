@@ -49,8 +49,11 @@ class PolicyValue(nn.Module):
         std = self.log_std.exp() #储存的对数标准差转化为标准差
         dist = torch.distributions.Normal(mean, std) #连续动作空间中动作的概率分布
         action = dist.sample() #动作采样
-        log_prob = dist.log_prob(action).sum(-1, keepdim=True) #动作对数频率log(Π_θ)
         action_tanh = torch.tanh(action) * a_max #限制action大小[-1,1]，环境输入。线性映射无法估计取到的值可以映射到多少
+        log_prob = dist.log_prob(action).sum(-1, keepdim=True)  # 动作对数频率log(Π_θ)
+        #tanh修正项: -sum(log(1 - tanh(u)^2 + eps))
+        eps = 1e-6
+        log_prob -= torch.log(1 - torch.tanh(action).pow(2) + eps).sum(-1, keepdim=True)
         #抽样动作，压缩后的抽样动作，对数动作频率（.detach()不跟踪梯度，.cpu().numpy()转换为NumPy数组）
         return action_tanh, action, log_prob
 
@@ -61,6 +64,10 @@ class PolicyValue(nn.Module):
         std = self.log_std.exp()
         dist = torch.distributions.Normal(mean, std)
         log_prob = dist.log_prob(action).sum(-1, keepdim=True)
+        # tanh修正项: -sum(log(1 - tanh(u)^2 + eps))
+        eps = 1e-6
+        log_prob -= torch.log(1 - torch.tanh(action).pow(2) + eps).sum(-1, keepdim=True)
+
         entropy = dist.entropy() #熵值
         value = self.value(fea) #状态价值
         #对数动作频率，状态价值，熵值
@@ -137,7 +144,7 @@ def ppo(memory, batch_size):
             optimizer.step() #更新策略网络＆价值网络的θ
 
 #主函数
-for episode in range(5000): #回合数
+for episode in range(2000): #回合数
     memory = Memory()
     state, info = env.reset()
     sum_rewards = 0
@@ -156,7 +163,7 @@ for episode in range(5000): #回合数
         done = terminated or truncated
 
         memory.state.append(state)
-        memory.action.append(action.numpy())
+        memory.action.append(action.cpu().numpy())
         memory.log_prob.append(log_prob.detach().numpy())
         memory.reward.append(reward)
         memory.value.append(value.item())
