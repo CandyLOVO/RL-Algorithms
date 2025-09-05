@@ -11,7 +11,7 @@ a_max = env.action_space.high
 class Memory(object):
     def __init__(self):
         self.state = []
-        self.action = []
+        self.action_tanh = [] #储存action_tanh
         self.reward = []
         self.log_prob = []
         self.value = []
@@ -86,15 +86,15 @@ class PolicyValue(nn.Module):
         values = np.array(values, dtype=np.float32)
         done = np.array(done, dtype=np.float32)
 
-        if len(values) == len(rewards):
-            values = np.append(values, values[-1]) #没有多存，values末尾加0，让values长度比rewards多1
-        elif len(values) > len(rewards)+1:
-            values = values[:len(rewards)+1] #多存，切片截断values
+        # if len(values) == len(rewards):
+        #     values = np.append(values, values[-1]) #没有多存，values末尾加0，让values长度比rewards多1
+        # elif len(values) > len(rewards)+1:
+        #     values = values[:len(rewards)+1] #多存，切片截断values
+        # values = np.array(values)
 
         T = len(rewards)
-        advantage = np.zeros(T) #优势函数
-        values = np.array(values)
-
+        assert len(values) == T + 1, f"values 长度应为 {T + 1}, 实际 {len(values)}"
+        advantage = np.zeros(T, dtype=np.float32) #优势函数
         ad = 0
         for t in reversed(range(T)): #T-1~0 序列反转
             delta = rewards[t] + gamma * (1 - done[t]) * values[t+1] - values[t] #加入结束标记
@@ -111,16 +111,16 @@ class PolicyValue(nn.Module):
 s_dim = env.observation_space.shape[0]
 a_dim = env.action_space.shape[0]
 h_dim = 128
-lr_optim = 0.001
+lr_optim = 0.0001
 policy = PolicyValue(s_dim, h_dim, a_dim)
 optimizer = optim.Adam(policy.parameters(), lr_optim) #两个网络共享优化器
 
 def ppo(memory, batch_size):
-    state = torch.tensor(memory.state).float()
-    action = torch.tensor(memory.action).float()
-    log_prob_old = torch.tensor(memory.log_prob).float()
-    returns = torch.tensor(memory.returns).float() #回归目标 At+Vst
-    advantage = torch.tensor(memory.advantage).float()
+    state = torch.from_numpy(np.asarray(memory.state, dtype=np.float32))
+    action = torch.from_numpy(np.asarray(memory.action_tanh, dtype=np.float32))
+    log_prob_old = torch.from_numpy(np.asarray(memory.log_prob, dtype=np.float32)).reshape(-1,1)
+    returns = torch.from_numpy(np.asarray(memory.returns, dtype=np.float32)).reshape(-1,1) #回归目标 At+Vst
+    advantage = torch.from_numpy(np.asarray(memory.advantage, dtype=np.float32)).reshape(-1,1)
 
     N = state.shape[0]
 
@@ -141,6 +141,7 @@ def ppo(memory, batch_size):
             log_prob_old_batch = log_prob_old[start:end]
             returns_batch = returns[start:end]
             advantage_batch = advantage[start:end]
+            advantage_batch = advantage_batch.detach()
 
             log_prob_new, value, entropy = policy.evaluate(state_batch, action_batch)
             ratio = torch.exp(log_prob_new - log_prob_old_batch)
@@ -194,10 +195,10 @@ for episode in range(1000): #回合数
 
         global_memory.state.append(state)
         # global_memory.action.append(action.squeeze(0).cpu().numpy())
-        global_memory.action.append(action_env) #存action_env即action_tanh，与环境一致
+        global_memory.action_tanh.append(action_env) #存action_env即action_tanh，与环境一致
         global_memory.log_prob.append(log_prob.squeeze(0).cpu().numpy())
         global_memory.reward.append(reward)
-        global_memory.value.append(value.item())
+        global_memory.value.append(value.item()) #每步只存V(s_t)
         global_memory.done.append(done)
 
         state = state_new
@@ -206,12 +207,14 @@ for episode in range(1000): #回合数
         if done:
             break
 
-    state_tensor = torch.tensor(state).float().unsqueeze(0)
-    with torch.no_grad():
-        fea = policy.forward(state_tensor)  # 隐藏层输出
-        value_final = policy.value(fea).item()  # 隐藏层->输出层
-    # memory.value.append(value_final)
-    global_memory.value.append(value_final)
+    if global_step >= step_update:
+        #bootstrap value，只在整个batch结束时加一次
+        state_tensor = torch.tensor(state).float().unsqueeze(0)
+        with torch.no_grad():
+            fea = policy.forward(state_tensor)  # 隐藏层输出
+            value_final = policy.value(fea)  # 隐藏层->输出层
+        # memory.value.append(value_final)
+        global_memory.value.append(value_final.item())
 
     # #reward标准化
     # reward_np = np.array(memory.reward)
@@ -220,7 +223,6 @@ for episode in range(1000): #回合数
     # reward_normalized = (reward_np - reward_mean) / reward_std
     # advantage, returns = policy.gae(reward_normalized, memory.value, memory.done, lamb, gamma)
 
-    if global_step >= step_update:
         advantage, returns = policy.gae(global_memory.reward, global_memory.value, global_memory.done, lamb, gamma)
         global_memory.advantage = advantage
         global_memory.returns = returns
@@ -245,5 +247,5 @@ plt.plot(all_rewards)
 plt.xlabel('Episode')
 plt.ylabel('Reward')
 text = f"lr: {lr_optim}\nbatch_size: {batch_size}"
-plt.text(x=1500, y=-700, s=text)
+plt.text(x=500, y=-700, s=text)
 plt.show()
