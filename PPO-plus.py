@@ -11,4 +11,4 @@ class PolicyNet(nn.Module):
         self.fc1 = nn.Linear(state_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
         self.mean = nn.Linear(hidden_dim, action_dim)
-        self.log_std = nn.Parameter(torch.zeros(hidden_dim, action_dim)) #不依赖于输入状态的固定参数，通过训练微调的全局参数
+        self.log_std = nn.Parameter(torch.zeros(action_dim)) #不依赖于输入状态的固定参数，通过训练微调的全局参数

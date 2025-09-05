@@ -2,16 +2,17 @@ import gymnasium
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 import matplotlib.pyplot as plt
 
 env = gymnasium.make('Pendulum-v1')
-a_max = env.action_space.high
+a_max = env.action_space.high[0]
 
 class Memory(object):
     def __init__(self):
         self.state = []
-        self.action_tanh = [] #储存action_tanh
+        self.action = []
         self.reward = []
         self.log_prob = []
         self.value = []
@@ -31,7 +32,7 @@ class PolicyValue(nn.Module):
         self.mean = nn.Linear(hidden_dim, action_dim) #将训练映射得到的动作特征定义为均值（动作中心）：杆子偏右->负力矩；偏左->正力矩
         #这里标记的参数是log(δ)，训练中被优化
         # self.log_std = nn.Parameter(torch.zeros(action_dim)) #长度位action_dim的零张量，标记为模型参数(nn.Parameter)，pytorch自动计算梯度
-        self.log_std = nn.Parameter(torch.zeros(action_dim)) #减小初始动作标准差
+        self.log_std = nn.Linear(hidden_dim, action_dim)
 
         #critic分支
         self.value = nn.Linear(hidden_dim, 1)
@@ -45,35 +46,38 @@ class PolicyValue(nn.Module):
     def get_action(self, state):
         fea = self.forward(state)
         #隐藏层->输出层
-        mean = self.mean(fea) #动作均值
-        std = self.log_std.exp() #储存的对数标准差转化为标准差
+        mean = self.mean(fea) #动作均值，随状态变化
+        mean = torch.tanh(mean) * a_max
+        # std = self.log_std.exp() #储存的对数标准差转化为标准差，固定值
+        std = F.softplus(self.log_std(fea))
+        std = torch.clamp(std, min=1e-6)
         dist = torch.distributions.Normal(mean, std) #连续动作空间中动作的概率分布
         action = dist.sample() #动作采样
-        action_tanh = torch.tanh(action) * a_max #限制action大小[-1,1]，环境输入。线性映射无法估计取到的值可以映射到多少
+        # action_tanh = torch.tanh(action) * a_max #限制action大小[-1,1]，环境输入。线性映射无法估计取到的值可以映射到多少
         log_prob = dist.log_prob(action).sum(-1, keepdim=True)  # 动作对数频率log(Π_θ)
-        #tanh修正项: -sum(log(1 - tanh(u)^2 + eps))
-        eps = 1e-6
-        log_prob -= torch.log(1 - torch.tanh(action).pow(2) + eps).sum(-1, keepdim=True)
-
-        #抽样动作，压缩后的抽样动作，对数动作频率（.detach()不跟踪梯度，.cpu().numpy()转换为NumPy数组）
-        return action_tanh, action, log_prob
-
-    #策略评估——同一(s,a)下新策略
-    def evaluate(self, state, action_tanh):
-        fea = self.forward(state)
-        mean = self.mean(fea)
-        std = self.log_std.exp()
-        dist = torch.distributions.Normal(mean, std)
-        # log_prob = dist.log_prob(action).sum(-1, keepdim=True)
-        # # tanh修正项: -sum(log(1 - tanh(u)^2 + eps))
+        # #tanh修正项: -sum(log(1 - tanh(u)^2 + eps))
         # eps = 1e-6
         # log_prob -= torch.log(1 - torch.tanh(action).pow(2) + eps).sum(-1, keepdim=True)
 
-        #改为输入action_tanh
-        eps = 1e-6
-        u = torch.atanh(torch.clamp(action_tanh / a_max, -1 + eps, 1 - eps)) #把action_tanh反推回u = atanh(action_tanh/a_max)
-        log_prob = dist.log_prob(u).sum(-1, keepdim=True)
-        log_prob -= torch.log(1 - torch.tanh(u).pow(2) + eps).sum(-1, keepdim=True)
+        #抽样动作，压缩后的抽样动作，对数动作频率（.detach()不跟踪梯度，.cpu().numpy()转换为NumPy数组）
+        return action, log_prob
+
+    #策略评估——同一(s,a)下新策略
+    def evaluate(self, state, action):
+        fea = self.forward(state)
+        mean = self.mean(fea)
+        mean = torch.tanh(mean) * a_max
+        # std = self.log_std.exp()
+        std = F.softplus(self.log_std(fea))
+        std = torch.clamp(std, min=1e-6)
+        dist = torch.distributions.Normal(mean, std)
+        log_prob = dist.log_prob(action).sum(-1, keepdim=True)
+
+        # #改为输入action_tanh
+        # eps = 1e-6
+        # u = torch.atanh(torch.clamp(action_tanh / a_max, -1 + eps, 1 - eps)) #把action_tanh反推回u = atanh(action_tanh/a_max)
+        # log_prob = dist.log_prob(u).sum(-1, keepdim=True)
+        # log_prob -= torch.log(1 - torch.tanh(u).pow(2) + eps).sum(-1, keepdim=True)
 
         entropy = dist.entropy().sum(-1, keepdim=True) #熵值
         value = self.value(fea) #状态价值
@@ -111,13 +115,13 @@ class PolicyValue(nn.Module):
 s_dim = env.observation_space.shape[0]
 a_dim = env.action_space.shape[0]
 h_dim = 128
-lr_optim = 0.0001
+lr_optim = 0.00005
 policy = PolicyValue(s_dim, h_dim, a_dim)
 optimizer = optim.Adam(policy.parameters(), lr_optim) #两个网络共享优化器
 
 def ppo(memory, batch_size):
     state = torch.from_numpy(np.asarray(memory.state, dtype=np.float32))
-    action = torch.from_numpy(np.asarray(memory.action_tanh, dtype=np.float32))
+    action = torch.from_numpy(np.asarray(memory.action, dtype=np.float32))
     log_prob_old = torch.from_numpy(np.asarray(memory.log_prob, dtype=np.float32)).reshape(-1,1)
     returns = torch.from_numpy(np.asarray(memory.returns, dtype=np.float32)).reshape(-1,1) #回归目标 At+Vst
     advantage = torch.from_numpy(np.asarray(memory.advantage, dtype=np.float32)).reshape(-1,1)
@@ -178,11 +182,11 @@ for episode in range(3000): #回合数
         # state_tensor = torch.tensor(state, dtype=torch.float).view(1, -1)
         #计算旧策略数据，用于“锚点”，不需要参与梯度计算，参数固定，限制新策略更新幅度。否则，反向传播时会同时更新新策略和旧策略的参数，导致log_probs_old随训练动态变化。
         with torch.no_grad():
-            action_tanh, action, log_prob = policy.get_action(state_tensor)
+            action, log_prob = policy.get_action(state_tensor)
             fea = policy.forward(state_tensor) #隐藏层输出
             value = policy.value(fea) #隐藏层->输出层
 
-        action_env = action_tanh.detach().cpu().numpy().reshape(-1)
+        action_env = action.detach().cpu().numpy().reshape(-1)
         state_new, reward, terminated, truncated, info = env.step(action_env) #T+1个state_new
         done = terminated or truncated
 
@@ -195,7 +199,7 @@ for episode in range(3000): #回合数
 
         global_memory.state.append(state)
         # global_memory.action.append(action.squeeze(0).cpu().numpy())
-        global_memory.action_tanh.append(action_env) #存action_env即action_tanh，与环境一致
+        global_memory.action.append(action_env)
         global_memory.log_prob.append(log_prob.squeeze(0).cpu().numpy())
         global_memory.reward.append(reward)
         global_memory.value.append(value.item()) #每步只存V(s_t)
