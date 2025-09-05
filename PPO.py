@@ -160,15 +160,15 @@ def ppo(memory, batch_size):
 clip = 0.2
 c1 = 0.5
 c2 = 0.01
-lamb=0.95
-gamma=0.99
+lamb= 0.95
+gamma= 0.99
 batch_size = 64
 all_rewards = []
 step_update = 2048
 global_step = 0
 global_memory = Memory()
 
-for episode in range(1000): #回合数
+for episode in range(3000): #回合数
     # memory = Memory()
     state, info = env.reset()
     sum_rewards = 0
