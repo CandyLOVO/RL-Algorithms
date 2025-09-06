@@ -54,7 +54,7 @@ class PolicyValue(nn.Module):
         dist = torch.distributions.Normal(mean, std) #连续动作空间中动作的概率分布
         action = dist.sample() #动作采样
         # action_tanh = torch.tanh(action) * a_max #限制action大小[-1,1]，环境输入。线性映射无法估计取到的值可以映射到多少
-        log_prob = dist.log_prob(action).sum(-1, keepdim=True)  # 动作对数频率log(Π_θ)
+        log_prob = dist.log_prob(action).sum(-1, keepdim=True)  #正态分布下动作对数频率log(Π_θ)
         # #tanh修正项: -sum(log(1 - tanh(u)^2 + eps))
         # eps = 1e-6
         # log_prob -= torch.log(1 - torch.tanh(action).pow(2) + eps).sum(-1, keepdim=True)
@@ -69,7 +69,7 @@ class PolicyValue(nn.Module):
         mean = torch.tanh(mean) * a_max
         # std = self.log_std.exp()
         std = F.softplus(self.log_std(fea))
-        std = torch.clamp(std, min=1e-6)
+        std = torch.clamp(std, min=1e-6) #限制最小值
         dist = torch.distributions.Normal(mean, std)
         log_prob = dist.log_prob(action).sum(-1, keepdim=True)
 
@@ -80,13 +80,14 @@ class PolicyValue(nn.Module):
         # log_prob -= torch.log(1 - torch.tanh(u).pow(2) + eps).sum(-1, keepdim=True)
 
         entropy = dist.entropy().sum(-1, keepdim=True) #熵值
-        value = self.value(fea) #状态价值
-        #对数动作频率，状态价值，熵值
+        value = self.value(fea) #当前状态价值估计
+        #对数动作频率，状态价值估计，熵值
         return log_prob, value, entropy
 
     def gae(self, rewards, values, done, lamb, gamma):
         #修正多回合导致的长度问题
         rewards = np.array(rewards, dtype=np.float32)
+        rewards = (rewards + 8.0) / 8.0
         values = np.array(values, dtype=np.float32)
         done = np.array(done, dtype=np.float32)
 
@@ -109,13 +110,14 @@ class PolicyValue(nn.Module):
         returns = torch.tensor(returns, dtype=torch.float32)
         advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8) #归一化，减小方差
         advantage = torch.tensor(advantage, dtype=torch.float32)
+        #优势函数，GAE估计目标值
         return advantage, returns
 
 #-------------------------------定义PPO函数-------------------------------#
 s_dim = env.observation_space.shape[0]
 a_dim = env.action_space.shape[0]
 h_dim = 128
-lr_optim = 0.00005
+lr_optim = 0.0001
 policy = PolicyValue(s_dim, h_dim, a_dim)
 optimizer = optim.Adam(policy.parameters(), lr_optim) #两个网络共享优化器
 
@@ -129,7 +131,7 @@ def ppo(memory, batch_size):
     N = state.shape[0]
 
     #环境交互回合，收集新数据memory---输入--->回合内，同一批数据重复次数，更新策略
-    for _ in range(4):
+    for _ in range(10):
         #数据随机打乱
         indices = torch.randperm(N) #打乱后的索引顺序
         state = state[indices] #数据按随机索引重新排列
@@ -143,7 +145,9 @@ def ppo(memory, batch_size):
             state_batch = state[start:end]
             action_batch = action[start:end] #未tanh的action
             log_prob_old_batch = log_prob_old[start:end]
+            log_prob_old_batch = log_prob_old_batch.detach()
             returns_batch = returns[start:end]
+            returns_batch = returns_batch.detach()
             advantage_batch = advantage[start:end]
             advantage_batch = advantage_batch.detach()
 
