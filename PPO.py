@@ -7,6 +7,7 @@ import torch.optim as optim
 import matplotlib.pyplot as plt
 
 env = gymnasium.make('Pendulum-v1')
+torch.manual_seed(0) #设置全局随机种子函数，保证PyTorch相关操作的随机性可复现
 a_max = env.action_space.high[0]
 
 class Memory(object):
@@ -31,8 +32,8 @@ class PolicyValue(nn.Module):
         #Π_θ定义为高斯分布（μ：最优动作方向；δ）
         self.mean = nn.Linear(hidden_dim, action_dim) #将训练映射得到的动作特征定义为均值（动作中心）：杆子偏右->负力矩；偏左->正力矩
         #这里标记的参数是log(δ)，训练中被优化
-        # self.log_std = nn.Parameter(torch.zeros(action_dim)) #长度位action_dim的零张量，标记为模型参数(nn.Parameter)，pytorch自动计算梯度
-        self.log_std = nn.Linear(hidden_dim, action_dim)
+        self.log_std = nn.Parameter(torch.zeros(action_dim)) #长度位action_dim的零张量，标记为模型参数(nn.Parameter)，pytorch自动计算梯度
+        # self.log_std = nn.Linear(hidden_dim, action_dim)
 
         #critic分支
         self.value = nn.Linear(hidden_dim, 1)
@@ -48,8 +49,8 @@ class PolicyValue(nn.Module):
         #隐藏层->输出层
         mean = self.mean(fea) #动作均值，随状态变化
         mean = torch.tanh(mean) * a_max
-        # std = self.log_std.exp() #储存的对数标准差转化为标准差，固定值
-        std = F.softplus(self.log_std(fea))
+        std = self.log_std.exp() #储存的对数标准差转化为标准差，固定值
+        # std = F.softplus(self.log_std(fea))
         std = torch.clamp(std, min=1e-6)
         dist = torch.distributions.Normal(mean, std) #连续动作空间中动作的概率分布
         action = dist.sample() #动作采样
@@ -67,8 +68,8 @@ class PolicyValue(nn.Module):
         fea = self.forward(state)
         mean = self.mean(fea)
         mean = torch.tanh(mean) * a_max
-        # std = self.log_std.exp()
-        std = F.softplus(self.log_std(fea))
+        std = self.log_std.exp()
+        # std = F.softplus(self.log_std(fea))
         std = torch.clamp(std, min=1e-6) #限制最小值
         dist = torch.distributions.Normal(mean, std)
         log_prob = dist.log_prob(action).sum(-1, keepdim=True)
@@ -87,7 +88,6 @@ class PolicyValue(nn.Module):
     def gae(self, rewards, values, done, lamb, gamma):
         #修正多回合导致的长度问题
         rewards = np.array(rewards, dtype=np.float32)
-        rewards = (rewards + 8.0) / 8.0
         values = np.array(values, dtype=np.float32)
         done = np.array(done, dtype=np.float32)
 
@@ -108,7 +108,7 @@ class PolicyValue(nn.Module):
         #values: T+1 ; advantage: T ; returns: T ; rewards: T
         returns = advantage + values[:-1] #截取到最后一个元素
         returns = torch.tensor(returns, dtype=torch.float32)
-        advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8) #归一化，减小方差
+        # advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8) #归一化，减小方差
         advantage = torch.tensor(advantage, dtype=torch.float32)
         #优势函数，GAE估计目标值
         return advantage, returns
@@ -118,6 +118,11 @@ s_dim = env.observation_space.shape[0]
 a_dim = env.action_space.shape[0]
 h_dim = 128
 lr_optim = 0.0001
+clip = 0.2
+c1 = 0.5
+c2 = 0.01
+lamb= 0.95
+gamma= 0.99
 policy = PolicyValue(s_dim, h_dim, a_dim)
 optimizer = optim.Adam(policy.parameters(), lr_optim) #两个网络共享优化器
 
@@ -131,7 +136,7 @@ def ppo(memory, batch_size):
     N = state.shape[0]
 
     #环境交互回合，收集新数据memory---输入--->回合内，同一批数据重复次数，更新策略
-    for _ in range(10):
+    for _ in range(5):
         #数据随机打乱
         indices = torch.randperm(N) #打乱后的索引顺序
         state = state[indices] #数据按随机索引重新排列
@@ -165,20 +170,15 @@ def ppo(memory, batch_size):
             optimizer.step() #更新策略网络＆价值网络的θ
 
 #-------------------------------主函数-------------------------------#
-clip = 0.2
-c1 = 0.5
-c2 = 0.01
-lamb= 0.95
-gamma= 0.99
 batch_size = 64
 all_rewards = []
 step_update = 2048
 global_step = 0
 global_memory = Memory()
 
-for episode in range(3000): #回合数
+for episode in range(2000): #回合数
     # memory = Memory()
-    state, info = env.reset()
+    state, info = env.reset(seed=0) #设置环境内部随机数生成器的种子，使环境的随机行为（如初始状态、随机事件等）保持一致
     sum_rewards = 0
 
     for t in range(200): #单回合中最大交互次数，倒立摆done始终为False，没有终止状态
@@ -192,6 +192,8 @@ for episode in range(3000): #回合数
 
         action_env = action.detach().cpu().numpy().reshape(-1)
         state_new, reward, terminated, truncated, info = env.step(action_env) #T+1个state_new
+        reward_raw = reward
+        reward = (float(reward) + 8.0) / 8.0
         done = terminated or truncated
 
         # memory.state.append(state)
@@ -210,7 +212,7 @@ for episode in range(3000): #回合数
         global_memory.done.append(done)
 
         state = state_new
-        sum_rewards += reward
+        sum_rewards += reward_raw
         global_step += 1
         if done:
             break
@@ -224,14 +226,14 @@ for episode in range(3000): #回合数
         # memory.value.append(value_final)
         global_memory.value.append(value_final.item())
 
-    # #reward标准化
-    # reward_np = np.array(memory.reward)
-    # reward_mean = np.mean(reward_np)
-    # reward_std = np.std(reward_np) + 1e-8
-    # reward_normalized = (reward_np - reward_mean) / reward_std
-    # advantage, returns = policy.gae(reward_normalized, memory.value, memory.done, lamb, gamma)
+        #reward标准化
+        reward_np = np.array(global_memory.reward)
+        reward_mean = np.mean(reward_np)
+        reward_std = np.std(reward_np) + 1e-8
+        reward_normalized = (reward_np - reward_mean) / reward_std
+        advantage, returns = policy.gae(reward_normalized, global_memory.value, global_memory.done, lamb, gamma)
 
-        advantage, returns = policy.gae(global_memory.reward, global_memory.value, global_memory.done, lamb, gamma)
+        # advantage, returns = policy.gae(global_memory.reward, global_memory.value, global_memory.done, lamb, gamma)
         global_memory.advantage = advantage
         global_memory.returns = returns
         ppo(global_memory, batch_size)
