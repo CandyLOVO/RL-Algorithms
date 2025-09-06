@@ -7,7 +7,6 @@ import torch.optim as optim
 import matplotlib.pyplot as plt
 
 env = gymnasium.make('Pendulum-v1')
-torch.manual_seed(0) #设置全局随机种子函数，保证PyTorch相关操作的随机性可复现
 a_max = env.action_space.high[0]
 
 class Memory(object):
@@ -76,7 +75,7 @@ class PolicyValue(nn.Module):
 
         # #改为输入action_tanh
         # eps = 1e-6
-        # u = torch.atanh(torch.clamp(action_tanh / a_max, -1 + eps, 1 - eps)) #把action_tanh反推回u = atanh(action_tanh/a_max)
+        # u = torch.atanh(torch.clamp(torch.tanh(action) / a_max, -1 + eps, 1 - eps)) #把action_tanh反推回u = atanh(action_tanh/a_max)
         # log_prob = dist.log_prob(u).sum(-1, keepdim=True)
         # log_prob -= torch.log(1 - torch.tanh(u).pow(2) + eps).sum(-1, keepdim=True)
 
@@ -108,7 +107,7 @@ class PolicyValue(nn.Module):
         #values: T+1 ; advantage: T ; returns: T ; rewards: T
         returns = advantage + values[:-1] #截取到最后一个元素
         returns = torch.tensor(returns, dtype=torch.float32)
-        # advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8) #归一化，减小方差
+        advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8) #归一化，减小方差
         advantage = torch.tensor(advantage, dtype=torch.float32)
         #优势函数，GAE估计目标值
         return advantage, returns
@@ -178,7 +177,7 @@ global_memory = Memory()
 
 for episode in range(2000): #回合数
     # memory = Memory()
-    state, info = env.reset(seed=0) #设置环境内部随机数生成器的种子，使环境的随机行为（如初始状态、随机事件等）保持一致
+    state, info = env.reset()
     sum_rewards = 0
 
     for t in range(200): #单回合中最大交互次数，倒立摆done始终为False，没有终止状态
@@ -257,5 +256,5 @@ plt.plot(all_rewards)
 plt.xlabel('Episode')
 plt.ylabel('Reward')
 text = f"lr: {lr_optim}\nbatch_size: {batch_size}"
-plt.text(x=500, y=-700, s=text)
+plt.text(x=0, y=-400, s=text)
 plt.show()
