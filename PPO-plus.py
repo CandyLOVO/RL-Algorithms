@@ -27,6 +27,29 @@ class PolicyNet(nn.Module):
         #限制大小后的均值，标准差——网络训练预测数据
         return mean, std
 
+class CriticNet(nn.Module):
+    def __init__(self, state_dim, hidden_dim):
+        super().__init__()
+        self.fc1 = nn.Linear(state_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.value = nn.Linear(hidden_dim, 1)
+
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        value = self.value(x)
+        #下一步价值的估计值
+        return value
+
+class PPO:
+    def __init__(self, state_dim, hidden_dim, action_dim, gamma, lam, actor_lr, critic_lr):
+        self.actor = PolicyNet(state_dim, hidden_dim, action_dim) #神经网络
+        self.critic = CriticNet(state_dim, hidden_dim)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), actor_lr) #优化器
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), critic_lr)
+        self.gamma = gamma
+        self.lam = lam
+
     def get_action(self, state):
         mean, std = self.forward(state)
         std = torch.clamp(std, min=1e-6) #限制std最小值
@@ -44,18 +67,3 @@ class PolicyNet(nn.Module):
         entropy = dist.entropy().sum(-1, keepdim=True)
         #新分布的对数动作概率，熵值
         return log_prob, entropy
-
-class CriticNet(nn.Module):
-    def __init__(self, state_dim, hidden_dim, action_dim):
-        super().__init__()
-        self.fc1 = nn.Linear(state_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.value = nn.Linear(hidden_dim, 1)
-
-    def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        value = self.value(x)
-        #下一步价值的估计值
-        return value
-
