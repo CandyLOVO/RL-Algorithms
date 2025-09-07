@@ -26,15 +26,17 @@ class PolicyNet(nn.Module):
         self.fc1 = nn.Linear(state_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
         self.mean = nn.Linear(hidden_dim, action_dim)
-        self.std = nn.Linear(hidden_dim, action_dim)
+        # self.std = nn.Linear(hidden_dim, action_dim)
+        self.std = nn.Parameter(torch.zeros(action_dim)) #网络只学习均值
 
     def forward(self, x):
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         mean = self.mean(x)
         mean = a_max * torch.tanh(mean) #限制在[-2,2]
-        std = self.std(x)
-        std = F.softplus(std) #保证std是正数
+        # std = self.std(x)
+        # std = F.softplus(std) #保证std是正数
+        std = self.std.exp()
         #限制大小后的均值，标准差——网络训练预测数据
         return mean, std
 
@@ -150,7 +152,7 @@ action_dim = env.action_space.shape[0]
 hidden_dim = 128
 gamma = 0.99
 lam = 0.95
-actor_lr = 1e-3
+actor_lr = 3e-4
 critic_lr = 1e-3
 batch_size = 64
 clip = 0.2
