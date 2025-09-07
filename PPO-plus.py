@@ -22,7 +22,7 @@ class PolicyNet(nn.Module):
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         mean = self.mean(x)
-        mean = a_max * torch.tanh(mean)
+        mean = a_max * torch.tanh(mean) #限制在[-2,2]
         std = self.std(x)
         std = F.softplus(std)
         #限制大小后的均值，标准差——网络训练预测数据
