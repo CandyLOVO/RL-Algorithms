@@ -1,6 +1,3 @@
-from collections import deque
-from mimetypes import guess_all_extensions
-
 import gymnasium
 import numpy as np
 import torch
@@ -91,7 +88,7 @@ class PPO_Agent:
         value = np.array(value, dtype=np.float32)
         done = np.array(done, dtype=np.float32)
         T = len(reward)
-        advantage = np.zeros_like(value, dtype=np.float32)
+        advantage = np.zeros_like(reward, dtype=np.float32)
         ad = 0.0
         for t in reversed(range(T)):
             delta = reward[t] + self.gamma * value[t+1] * (1 - done[t]) - value[t]
@@ -103,7 +100,13 @@ class PPO_Agent:
         return torch.tensor(returns, dtype=torch.float32), torch.tensor(advantage, dtype=torch.float32)
 
     def ppo_update(self, state, action, log_prob_old, returns, advantage):
-        N = state.shape[0]
+        state = torch.from_numpy(np.asarray(state, dtype=np.float32))
+        action = torch.from_numpy(np.asarray(action, dtype=np.float32))
+        log_prob_old = torch.from_numpy(np.asarray(log_prob_old, dtype=np.float32)).reshape(-1, 1)
+        returns = torch.from_numpy(np.asarray(returns, dtype=np.float32)).reshape(-1, 1)
+        advantage = torch.from_numpy(np.asarray(advantage, dtype=np.float32)).reshape(-1, 1)
+
+        N = len(state)
         for _ in range(5):
             indices = torch.randperm(N)
             state = state[indices]
@@ -154,5 +157,68 @@ clip = 0.2
 c1 = 0.5
 c2 = 0.01
 memory = Memory()
-ppo = PPO_Agent(state_dim, action_dim, hidden_dim, action_dim, gamma, lam, batch_size, memory, gamma, c1, c2)
+ppo = PPO_Agent(state_dim, hidden_dim, action_dim, gamma, lam, actor_lr, critic_lr, batch_size, clip, c1, c2)
+steps = 0
+step_update = 2048
+reward_all = []
 
+for episode in range(2000):
+    state, info = env.reset()
+    reward_sum = 0
+
+    #200步内状态收集更新
+    for t in range(200):
+        state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
+        with torch.no_grad():
+            action, log_prob = ppo.get_action(state_tensor)
+            value = ppo.critic.forward(state_tensor)
+
+        action_env = action.detach().cpu().numpy().reshape(-1)
+        state_new, reward, terminated, truncated, info = env.step(action_env)
+        reward_sum += reward
+        reward = (float(reward) + 8.0) / 8.0
+        done = terminated or truncated
+
+        memory.state.append(state)
+        memory.action.append(action_env)
+        memory.log_prob.append(log_prob.squeeze(0).cpu().numpy())
+        memory.rewards.append(reward)
+        memory.values.append(value.item())
+        memory.done.append(done)
+
+        state = state_new
+        steps += 1
+        if done:
+            break
+
+    #结束一轮，batch数据收集够了，需要计算advantage、returns，并用ppo函数更新策略
+    if steps >= step_update:
+        # 补上value的第 T+1 位值
+        state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
+        with torch.no_grad():
+            value_final = ppo.critic.forward(state_tensor)
+        memory.values.append(value_final.item())
+
+        #reward标准化 -> 计算value目标值（GAE近似）
+        reward_np = np.array(memory.rewards)
+        reward_mean = np.mean(reward_np)
+        reward_std = np.std(reward_np) + 1e-8
+        reward_normalized = (reward_np - reward_mean) / reward_std
+        returns, advantage = ppo.gae(reward_normalized, memory.values, memory.done)
+        memory.returns = returns
+        memory.advantage = advantage
+
+        ppo.ppo_update(memory.state, memory.action, memory.log_prob, memory.returns, memory.advantage)
+
+        memory = Memory() #重置memory
+        steps = 0
+
+    reward_all.append(reward_sum)
+    print(f"Episode {episode}, total reward: {reward_sum}")
+
+plt.plot(reward_all)
+plt.xlabel('Episode')
+plt.ylabel('Reward')
+text = f"actor_lr: {actor_lr}\ncritic_lr: {critic_lr}\nbatch_size: {batch_size}"
+plt.text(x=0, y=-400, s=text)
+plt.show()
