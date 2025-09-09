@@ -151,13 +151,13 @@ state_dim = env.observation_space.shape[0]
 action_dim = env.action_space.shape[0]
 hidden_dim = 128
 gamma = 0.99
-lam = 0.95
-actor_lr = 3e-4
-critic_lr = 1e-3
+lam = 0.98
+actor_lr = 1e-4
+critic_lr = 5e-4
 batch_size = 64
 clip = 0.2
 c1 = 0.5
-c2 = 0.01
+c2 = 0.005
 memory = Memory()
 ppo = PPO_Agent(state_dim, hidden_dim, action_dim, gamma, lam, actor_lr, critic_lr, batch_size, clip, c1, c2)
 steps = 0
@@ -172,7 +172,7 @@ for episode in range(2000):
     for t in range(200):
         state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
         with torch.no_grad():
-            action, log_prob = ppo.get_action(state_tensor)
+            action, log_prob = ppo.get_action(state_tensor) #采样
             value = ppo.critic.forward(state_tensor)
 
         action_env = action.detach().cpu().numpy().reshape(-1)
@@ -181,6 +181,7 @@ for episode in range(2000):
         reward = (float(reward) + 8.0) / 8.0
         done = terminated or truncated
 
+        #记录互动整个过程
         memory.state.append(state)
         memory.action.append(action_env)
         memory.log_prob.append(log_prob.squeeze(0).cpu().numpy())
@@ -221,6 +222,6 @@ for episode in range(2000):
 plt.plot(reward_all)
 plt.xlabel('Episode')
 plt.ylabel('Reward')
-text = f"actor_lr: {actor_lr}\ncritic_lr: {critic_lr}\nbatch_size: {batch_size}"
+text = f"actor_lr: {actor_lr}\ncritic_lr: {critic_lr}\nbatch_size: {batch_size}\ngamma: {gamma}\nlam: {lam}\nc1: {c1}\nc2: {c2}"
 plt.text(x=0, y=-400, s=text)
 plt.show()
